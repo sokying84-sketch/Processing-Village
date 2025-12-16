@@ -1,0 +1,1543 @@
+import { MushroomBatch, BatchStatus, ApiResponse, InventoryItem, PurchaseOrder, SalesRecord, Customer, FinishedGood, SalesStatus, PaymentMethod, DailyCostMetrics, Supplier, Recipe, UserRole, Budget } from '../types';
+import { db, auth, storage } from './firebase';
+import firebase from 'firebase/compat/app';
+
+// ============================================================================
+// CONFIGURATION MANAGEMENT
+// ============================================================================
+// ENTER YOUR FIXED URLS HERE TO LOCK THEM IN
+const FIXED_SCRIPT_URL = ''; 
+const FIXED_SHEET_URL = '';
+
+const DEFAULT_SCRIPT_URL = ''; 
+const DEFAULT_SHEET_URL = ''; 
+
+const STORAGE_KEY_URL = 'shroomtrack_api_url';
+const STORAGE_KEY_SHEET_URL = 'shroomtrack_sheet_url';
+const STORAGE_KEY_MOCK = 'shroomtrack_use_mock';
+const STORAGE_KEY_LABOR_RATE = 'shroomtrack_labor_rate';
+const STORAGE_KEY_RAW_RATE = 'shroomtrack_raw_rate';
+const STORAGE_KEY_THEME = 'shroomtrack_theme';
+
+export const getAppSettings = () => {
+  const storedUrl = localStorage.getItem(STORAGE_KEY_URL);
+  const storedSheetUrl = localStorage.getItem(STORAGE_KEY_SHEET_URL);
+  const storedMock = localStorage.getItem(STORAGE_KEY_MOCK);
+  
+  // Prioritize FIXED constants if they are set (not empty string)
+  const finalScriptUrl = FIXED_SCRIPT_URL !== '' ? FIXED_SCRIPT_URL : (storedUrl || DEFAULT_SCRIPT_URL);
+  const finalSheetUrl = FIXED_SHEET_URL !== '' ? FIXED_SHEET_URL : (storedSheetUrl || DEFAULT_SHEET_URL);
+  
+  return {
+    scriptUrl: finalScriptUrl,
+    sheetUrl: finalSheetUrl,
+    useMock: storedMock !== null ? storedMock === 'true' : (finalScriptUrl ? false : true),
+    isFixed: FIXED_SCRIPT_URL !== ''
+  };
+};
+
+export const saveAppSettings = (url: string, sheetUrl: string, useMock: boolean) => {
+  localStorage.setItem(STORAGE_KEY_URL, url);
+  localStorage.setItem(STORAGE_KEY_SHEET_URL, sheetUrl);
+  localStorage.setItem(STORAGE_KEY_MOCK, String(useMock));
+};
+
+export const getLaborRate = (): number => {
+    return parseFloat(localStorage.getItem(STORAGE_KEY_LABOR_RATE) || '12.50');
+};
+
+export const setLaborRate = (rate: number) => {
+    localStorage.setItem(STORAGE_KEY_LABOR_RATE, rate.toString());
+};
+
+export const getRawMaterialRate = (): number => {
+    return parseFloat(localStorage.getItem(STORAGE_KEY_RAW_RATE) || '8.00');
+};
+
+export const setRawMaterialRate = (rate: number) => {
+    localStorage.setItem(STORAGE_KEY_RAW_RATE, rate.toString());
+};
+
+// ============================================================================
+// THEME MANAGEMENT
+// ============================================================================
+
+export interface ThemeDefinition {
+    id: string;
+    label: string;
+    colors: Record<string, string>;
+}
+
+export const THEMES: Record<string, ThemeDefinition> = {
+    mushroom: {
+        id: 'mushroom',
+        label: 'Mushroom Earth',
+        colors: {
+            '--earth-50': '#fafaf9',
+            '--earth-100': '#f5f5f4',
+            '--earth-200': '#e7e5e4',
+            '--earth-300': '#d6d3d1',
+            '--earth-400': '#a8a29e',
+            '--earth-500': '#78716c',
+            '--earth-600': '#57534e',
+            '--earth-700': '#44403c',
+            '--earth-800': '#292524',
+            '--earth-900': '#1c1917',
+            '--nature-50': '#f0fdf4',
+            '--nature-100': '#dcfce7',
+            '--nature-200': '#bbf7d0',
+            '--nature-300': '#86efac',
+            '--nature-400': '#4ade80',
+            '--nature-500': '#22c55e',
+            '--nature-600': '#16a34a',
+            '--nature-700': '#15803d',
+            '--nature-800': '#166534',
+            '--nature-900': '#14532d'
+        }
+    },
+    ocean: {
+        id: 'ocean',
+        label: 'Ocean Breeze',
+        colors: {
+            '--earth-50': '#f0f9ff',
+            '--earth-100': '#e0f2fe',
+            '--earth-200': '#bae6fd',
+            '--earth-300': '#7dd3fc',
+            '--earth-400': '#38bdf8',
+            '--earth-500': '#0ea5e9',
+            '--earth-600': '#0284c7',
+            '--earth-700': '#0369a1',
+            '--earth-800': '#075985',
+            '--earth-900': '#0c4a6e',
+            '--nature-50': '#f5f3ff',
+            '--nature-100': '#ede9fe',
+            '--nature-200': '#ddd6fe',
+            '--nature-300': '#c4b5fd',
+            '--nature-400': '#a78bfa',
+            '--nature-500': '#8b5cf6',
+            '--nature-600': '#7c3aed',
+            '--nature-700': '#6d28d9',
+            '--nature-800': '#5b21b6',
+            '--nature-900': '#4c1d95'
+        }
+    },
+    forest: {
+        id: 'forest',
+        label: 'Deep Forest',
+        colors: {
+            '--earth-50': '#f0fdf4',
+            '--earth-100': '#dcfce7',
+            '--earth-200': '#bbf7d0',
+            '--earth-300': '#86efac',
+            '--earth-400': '#4ade80',
+            '--earth-500': '#22c55e',
+            '--earth-600': '#16a34a',
+            '--earth-700': '#15803d',
+            '--earth-800': '#166534',
+            '--earth-900': '#14532d',
+            '--nature-50': '#ecfdf5',
+            '--nature-100': '#d1fae5',
+            '--nature-200': '#a7f3d0',
+            '--nature-300': '#6ee7b7',
+            '--nature-400': '#34d399',
+            '--nature-500': '#10b981',
+            '--nature-600': '#059669',
+            '--nature-700': '#047857',
+            '--nature-800': '#065f46',
+            '--nature-900': '#064e3b'
+        }
+    }
+};
+
+export const getTheme = (): string => {
+    return localStorage.getItem(STORAGE_KEY_THEME) || 'mushroom';
+};
+
+export const applyTheme = (themeId: string) => {
+    const theme = THEMES[themeId] || THEMES['mushroom'];
+    localStorage.setItem(STORAGE_KEY_THEME, themeId);
+    
+    // Apply CSS Variables
+    const root = document.documentElement;
+    Object.entries(theme.colors).forEach(([key, value]) => {
+        root.style.setProperty(key, value);
+    });
+};
+
+// ============================================================================
+// FIRESTORE HELPERS
+// ============================================================================
+
+// Helper to remove undefined fields which Firestore rejects
+const cleanFirestoreData = <T>(data: T): T => {
+  return JSON.parse(JSON.stringify(data));
+};
+
+// UPDATED FOR SHARED/COMPANY VIEW
+const getUserCollection = (collectionName: string) => {
+  // Return root collection for shared data access
+  return db.collection(collectionName);
+};
+
+// UPDATED FOR SHARED/COMPANY VIEW
+const getUserDoc = (collectionName: string, docId: string) => {
+  // Return root doc for shared data access
+  return db.collection(collectionName).doc(docId);
+};
+
+// ============================================================================
+// USER ROLE MANAGEMENT
+// ============================================================================
+export const getUserRole = async (): Promise<string> => {
+  const user = auth.currentUser;
+  if (!user) return 'GUEST';
+
+  try {
+    const docRef = db.collection('user_roles').doc(user.uid);
+    const snap = await docRef.get();
+    if (snap.exists) {
+      return snap.data()?.role || 'GUEST';
+    }
+    return 'GUEST';
+  } catch (error) {
+    console.error("Role fetch error:", error);
+    return 'GUEST';
+  }
+};
+
+// ============================================================================
+// STORAGE HELPERS
+// ============================================================================
+export const uploadImage = async (file: File, path: string): Promise<string> => {
+    const user = auth.currentUser;
+    if (!user) throw new Error("User not authenticated");
+    
+    try {
+        // Create a unique reference: company_assets/path/timestamp_filename
+        const storageRef = storage.ref(`company_assets/${path}/${Date.now()}_${file.name}`);
+        const snapshot = await storageRef.put(file);
+        return await snapshot.ref.getDownloadURL();
+    } catch (error: any) {
+        console.error("Firebase Storage Error:", error);
+        
+        // Provide helpful debugging info for the most common error
+        if (error.code === 'storage/unauthorized') {
+            const warningMsg = `
+⚠️ PERMISSION DENIED: Firebase Storage Rules are blocking this upload.
+To fix this, go to Firebase Console > Storage > Rules and change them to:
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
+            `;
+            console.warn(warningMsg);
+            throw new Error("Permission denied. See console for Firebase Rules instructions.");
+        }
+        throw error;
+    }
+};
+
+// ============================================================================
+// RECIPE MANAGEMENT
+// ============================================================================
+export const getRecipes = async (): Promise<Recipe[]> => {
+    const colRef = getUserCollection('recipes');
+    if (colRef) {
+        console.log("📚 Fetching recipes from Firestore (Shared)...");
+        const snap = await colRef.get();
+        console.log(`✅ Found ${snap.size} recipes in Firestore.`);
+        return snap.docs.map(d => ({ id: d.id, ...d.data() } as Recipe));
+    }
+    // Fallback to local storage for demo/unauthenticated
+    console.warn("⚠️ Fetching recipes from LocalStorage (Auth missing)");
+    const stored = localStorage.getItem('shroomtrack_recipes');
+    return stored ? JSON.parse(stored) : [];
+};
+
+export const saveRecipe = async (recipe: Recipe, imageFile?: File): Promise<ApiResponse<Recipe>> => {
+    const user = auth.currentUser;
+    let imageUrl = recipe.imageUrl || '';
+
+    if (imageFile && user) {
+        try {
+            imageUrl = await uploadImage(imageFile, 'recipe_images');
+        } catch (e) {
+            console.error("Image upload failed", e);
+        }
+    }
+
+    const recipeData = { ...recipe, imageUrl };
+    
+    if (user) {
+        console.log(`💾 Saving recipe ${recipe.name} to Firestore (Shared)`);
+        // Firestore Save
+        // If ID exists and looks like a custom ID, update it. Otherwise create new in root collection.
+        let docRef;
+        if (recipe.id.startsWith('r-') || recipe.id.startsWith('rec-')) {
+            docRef = getUserDoc('recipes', recipe.id);
+        } else {
+            docRef = db.collection('recipes').doc();
+        }
+            
+        if (!docRef) return { success: false, message: "Auth Error" };
+        
+        // Ensure ID is set on data
+        if (!recipeData.id) recipeData.id = docRef.id;
+
+        await docRef.set(cleanFirestoreData(recipeData), { merge: true });
+        return { success: true, data: recipeData };
+    } else {
+        console.warn(`💾 Saving recipe ${recipe.name} to LocalStorage (User not authenticated)`);
+        // LocalStorage Fallback
+        const recipes = await getRecipes();
+        const idx = recipes.findIndex(r => r.id === recipe.id);
+        let updatedRecipes;
+        if (idx !== -1) {
+            recipes[idx] = recipeData;
+            updatedRecipes = recipes;
+        } else {
+            updatedRecipes = [...recipes, recipeData];
+        }
+        localStorage.setItem('shroomtrack_recipes', JSON.stringify(updatedRecipes));
+        return { success: true, data: recipeData };
+    }
+};
+
+export const deleteRecipe = async (id: string): Promise<boolean> => {
+    try {
+        const docRef = getUserDoc('recipes', id);
+        if (docRef) {
+            await docRef.delete();
+            return true;
+        }
+        // Local fallback
+        const recipes = await getRecipes();
+        const updated = recipes.filter(r => r.id !== id);
+        localStorage.setItem('shroomtrack_recipes', JSON.stringify(updated));
+        return true;
+    } catch (e) {
+        console.error("Error deleting recipe:", e);
+        return false;
+    }
+};
+
+// ============================================================================
+// MOCK DATA STORE (LOCAL CACHE)
+// ============================================================================
+let mockBatches: MushroomBatch[] = [];
+let mockFinishedGoods: FinishedGood[] = [];
+let mockSuppliers: Supplier[] = [
+    { id: 'sup-1', name: 'Label Masters', contact: 'sales@labelmasters.com' },
+    { id: 'sup-2', name: 'Pack Pack Ltd', contact: 'orders@packpack.com' }
+];
+
+// Initialize with requested items
+let mockInventory: InventoryItem[] = [
+  {
+    id: 'inv-sticker',
+    name: 'Brand Stickers',
+    type: 'LABEL',
+    subtype: 'STICKER',
+    quantity: 300, 
+    threshold: 300,
+    unit: 'units',
+    unitCost: 45.00, // Per pack of 300
+    packSize: 300,
+    supplier: 'Label Masters'
+  },
+  {
+    id: 'inv-pouch',
+    name: 'Vacuum Pouches (Standard)',
+    type: 'PACKAGING',
+    subtype: 'POUCH',
+    quantity: 100,
+    threshold: 100,
+    unit: 'units',
+    unitCost: 45.00, // Per pack of 100
+    packSize: 100,
+    supplier: 'Pack Pack Ltd'
+  },
+  {
+    id: 'inv-tin',
+    name: 'Metal Tin',
+    type: 'PACKAGING',
+    subtype: 'TIN',
+    quantity: 25,
+    threshold: 100,
+    unit: 'units',
+    unitCost: 30.00, // Per pack of 25
+    packSize: 25,
+    supplier: 'Pack Pack Ltd'
+  }
+];
+
+let mockPurchaseOrders: PurchaseOrder[] = [];
+let mockCustomers: Customer[] = [];
+let mockSales: SalesRecord[] = [];
+let mockDailyCosts: DailyCostMetrics[] = [];
+
+// READ-YOUR-WRITES BUFFER
+let lastWriteTime = 0;
+const WRITE_BUFFER_MS = 2000; // 2 seconds
+
+// Helper to log transactional cost
+const recordCostTransaction = async (
+    referenceId: string, 
+    rawCost: number, 
+    wasteCost: number, 
+    pkgCost: number, 
+    laborCost: number,
+    weightProcessed: number = 0,
+    processingHours: number = 0
+) => {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Create a new transaction row for every event (Batch by Batch)
+    const newTransaction: DailyCostMetrics = {
+        id: `COST-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+        referenceId: referenceId, // Batch ID or PO ID
+        date: today,
+        weightProcessed: weightProcessed,
+        processingHours: processingHours,
+        rawMaterialCost: parseFloat(rawCost.toFixed(2)),
+        packagingCost: parseFloat(pkgCost.toFixed(2)),
+        wastageCost: parseFloat(wasteCost.toFixed(2)),
+        laborCost: parseFloat(laborCost.toFixed(2)),
+        totalCost: parseFloat((rawCost + pkgCost + wasteCost + laborCost).toFixed(2))
+    };
+    
+    mockDailyCosts.unshift(newTransaction);
+
+    // Sync to Firestore 'finance_log' (daily_costs)
+    const docRef = getUserDoc('daily_costs', newTransaction.id || '');
+    if (docRef) {
+        await docRef.set(cleanFirestoreData(newTransaction));
+    }
+};
+
+export const getLocalData = () => {
+  return [...mockBatches];
+};
+
+// ============================================================================
+// SYNC SERVICES (MANUAL PUSH/PULL)
+// ============================================================================
+
+export const pushFullDatabase = async (): Promise<ApiResponse<any>> => {
+    const { scriptUrl, useMock } = getAppSettings();
+    if (useMock || !scriptUrl) return { success: false, message: "No API URL configured" };
+
+    const payload = {
+        batches: mockBatches,
+        inventory: mockInventory,
+        finishedGoods: mockFinishedGoods,
+        dailyCosts: mockDailyCosts
+    };
+
+    try {
+        await fetch(scriptUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'SYNC_FULL_DB',
+                payload: payload
+            })
+        });
+        return { success: true, message: "Full database push sent." };
+    } catch (e) {
+        return { success: false, message: "Failed to push data." };
+    }
+};
+
+export const pullFullDatabase = async (): Promise<ApiResponse<any>> => {
+    const { scriptUrl, useMock } = getAppSettings();
+    if (useMock || !scriptUrl) return { success: false, message: "No API URL configured" };
+
+    try {
+        const res = await fetch(`${scriptUrl}?action=GET_FULL_DB`);
+        const json = await res.json();
+        
+        if (json.success && json.data) {
+            // Overwrite local memory with remote data
+            if (json.data.batches) mockBatches = json.data.batches;
+            if (json.data.inventory) mockInventory = json.data.inventory;
+            if (json.data.finishedGoods) mockFinishedGoods = json.data.finishedGoods;
+            if (json.data.dailyCosts) mockDailyCosts = json.data.dailyCosts;
+            
+            return { success: true, message: "Data synced from sheet." };
+        }
+    } catch (e) {
+        return { success: false, message: "Failed to pull data." };
+    }
+    return { success: false, message: "Unknown error" };
+};
+
+
+// ============================================================================
+// BATCH SERVICES
+// ============================================================================
+
+export const fetchBatches = async (forceRemote = false): Promise<ApiResponse<MushroomBatch[]>> => {
+  // Sync with Firestore if authenticated
+  const colRef = getUserCollection('batches');
+  if (colRef) {
+      try {
+          const snapshot = await colRef.get();
+          const data = snapshot.docs.map(d => d.data() as MushroomBatch);
+          // Sort by date received desc
+          data.sort((a,b) => new Date(b.dateReceived).getTime() - new Date(a.dateReceived).getTime());
+          mockBatches = data; // Update local cache
+          return { success: true, data };
+      } catch (e) {
+          console.error("Firestore Error:", e);
+      }
+  }
+
+  if (forceRemote) {
+      await pullFullDatabase();
+  }
+  return { success: true, data: [...mockBatches] };
+};
+
+export const createBatch = async (
+  farm: string, 
+  rawWeight: number, 
+  spoiledWeight: number,
+  farmBatchId?: string, // NEW
+  species?: string,     // NEW
+  flushNumber?: string  // NEW
+): Promise<ApiResponse<MushroomBatch>> => {
+  const newId = `BATCH-${Math.floor(Math.random() * 10000)}`;
+  const newBatch: MushroomBatch = {
+    id: newId,
+    farmBatchId: farmBatchId,
+    species: species,
+    flushNumber: flushNumber,
+    dateReceived: new Date().toISOString(),
+    sourceFarm: farm,
+    rawWeightKg: rawWeight,
+    spoiledWeightKg: spoiledWeight,
+    netWeightKg: rawWeight - spoiledWeight,
+    remainingWeightKg: rawWeight - spoiledWeight,
+    status: BatchStatus.RECEIVED
+  };
+  mockBatches.unshift(newBatch);
+
+  // FIRESTORE SYNC: Receiving Log
+  const docRef = getUserDoc('batches', newId);
+  if (docRef) {
+      await docRef.set(cleanFirestoreData(newBatch));
+  }
+
+  // AUTO LOG: Raw Material Cost + Receiving Wastage
+  const rawRate = getRawMaterialRate();
+  const rawCost = rawWeight * rawRate;
+  
+  await recordCostTransaction(newId, rawCost, 0, 0, 0, rawWeight, 0);
+
+  return { success: true, data: newBatch };
+};
+
+export const updateBatchStatus = async (
+  id: string, 
+  status: BatchStatus, 
+  updates: Partial<MushroomBatch> = {}
+): Promise<ApiResponse<MushroomBatch>> => {
+  const index = mockBatches.findIndex(b => b.id === id);
+  if (index === -1) return { success: false, message: "Batch not found" };
+  
+  let updatedBatch = { ...mockBatches[index], ...updates, status };
+  
+  // LOGIC: BATCH COMPLETION (Labor & Processing Waste)
+  if (status === BatchStatus.DRYING_COMPLETE && updatedBatch.processConfig) {
+      const startTime = updatedBatch.processConfig.startTime;
+      const durationHours = (Date.now() - startTime) / (1000 * 60 * 60);
+      
+      const laborRate = getLaborRate();
+      const laborCost = durationHours * laborRate;
+      
+      const processingWaste = updates.processingWastageKg || 0;
+      // Wastage cost = Kg lost * Raw Rate (Cost of goods lost)
+      const wasteCost = processingWaste * getRawMaterialRate();
+
+      await recordCostTransaction(
+          id, 
+          0, // Raw cost already logged at reception
+          wasteCost, 
+          0, 
+          laborCost, 
+          0, 
+          parseFloat(durationHours.toFixed(2))
+      );
+  }
+
+  if (status === BatchStatus.DRYING_COMPLETE && updates.processingWastageKg) {
+      const currentNet = updatedBatch.netWeightKg;
+      const wastage = updates.processingWastageKg || 0;
+      updatedBatch.remainingWeightKg = Math.max(0, currentNet - wastage);
+  }
+
+  mockBatches[index] = updatedBatch;
+
+  // FIRESTORE SYNC: Processing Log
+  const docRef = getUserDoc('batches', id);
+  if (docRef) {
+      await docRef.update(cleanFirestoreData({ ...updates, status, remainingWeightKg: updatedBatch.remainingWeightKg }));
+  }
+
+  return { success: true, data: mockBatches[index] };
+};
+
+// ============================================================================
+// HARVEST ALERTS
+// ============================================================================
+let mockAlerts = [
+    { id: 'h-1', farmName: 'Hilltop Myco', species: 'White Oyster', estimatedWeightKg: 45.5, timestamp: new Date().toISOString() }
+];
+
+export const checkHarvestAlerts = async (): Promise<ApiResponse<any>> => {
+  const { scriptUrl, useMock } = getAppSettings();
+  if (useMock || !scriptUrl) return { success: true, data: mockAlerts };
+
+  try {
+    const response = await fetch(`${scriptUrl}?action=CHECK_ALERTS`);
+    if (!response.ok) throw new Error("Network error");
+    const json = await response.json();
+    
+    // If backend returns empty array, trust it. Only default to mock on ERROR.
+    if (json.success) return json;
+    
+    return { success: false, message: "Failed to parse alerts" };
+  } catch (error) {
+    console.error("Alert fetch failed", error);
+    return { success: true, data: mockAlerts }; // Fallback to mock only on network fail
+  }
+};
+
+export const clearHarvestAlert = async (id: string): Promise<ApiResponse<any>> => {
+  const { scriptUrl, useMock } = getAppSettings();
+  mockAlerts = mockAlerts.filter(a => a.id !== id);
+  
+  if (useMock || !scriptUrl) return { success: true, message: "Alert cleared (Local)" };
+
+  try {
+    await fetch(scriptUrl, {
+      method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'CLEAR_ALERT', payload: { id: id } })
+    });
+    return { success: true, message: "Alert cleared." };
+  } catch (error) {
+    return { success: true, message: "Alert cleared (Fallback)." };
+  }
+};
+
+// ============================================================================
+// PACKING SERVICES
+// ============================================================================
+
+export const packBatchPartial = async (
+  batchId: string,
+  weightToPack: number,
+  packCount: number,
+  packagingType: 'TIN' | 'POUCH',
+  recipeName: string
+): Promise<ApiResponse<FinishedGood>> => {
+  const batchIndex = mockBatches.findIndex(b => b.id === batchId);
+  if (batchIndex === -1) return { success: false, message: "Batch not found" };
+  
+  const batch = mockBatches[batchIndex];
+  const currentRemaining = batch.remainingWeightKg !== undefined ? batch.remainingWeightKg : batch.netWeightKg;
+
+  batch.remainingWeightKg = Math.max(0, currentRemaining - weightToPack);
+  if (batch.remainingWeightKg < 0.1) {
+    batch.status = BatchStatus.PACKED;
+  }
+  
+  // Sync Batch Update to Firestore
+  const batchDocRef = getUserDoc('batches', batch.id);
+  if (batchDocRef) {
+      await batchDocRef.update(cleanFirestoreData({ remainingWeightKg: batch.remainingWeightKg, status: batch.status }));
+  }
+
+  const newFinishedGood: FinishedGood = {
+    id: `FG-${Date.now()}`,
+    batchId: batch.id,
+    recipeName: recipeName,
+    packagingType: packagingType,
+    quantity: packCount,
+    datePacked: new Date().toISOString(),
+    sellingPrice: 15.00 
+  };
+  mockFinishedGoods.unshift(newFinishedGood);
+
+  // Sync Finished Good to Firestore (Packing Log)
+  const fgDocRef = getUserDoc('finished_goods', newFinishedGood.id);
+  if (fgDocRef) {
+      await fgDocRef.set(cleanFirestoreData(newFinishedGood));
+  }
+
+  // INVENTORY DEDUCTION (SMART LOOP: FIND ALL MATCHING & CONSUME)
+  const deductStock = async (subtype: string, quantityToDeduct: number) => {
+     // Robust filter: Check subtype OR name (case insensitive) for legacy data compatibility
+     const items = mockInventory.filter(i => {
+         // 1. Strict Subtype Match
+         if (i.subtype === subtype) return true;
+         
+         // 2. Special Case: Labels
+         if (subtype === 'STICKER' && (i.type === 'LABEL' || i.name.toUpperCase().includes('STICKER') || i.name.toUpperCase().includes('LABEL'))) return true;
+         
+         // 3. Fallback: Name contains subtype (e.g. "Pouch" in "Vacuum Pouches")
+         if (i.name.toUpperCase().includes(subtype)) return true;
+         
+         return false;
+     });
+     
+     // Sort by quantity ascending (use up small batches first?) or id? 
+     // Let's sort by ID to be deterministic, or quantity > 0 first.
+     // Prioritize items with positive quantity
+     items.sort((a, b) => b.quantity - a.quantity);
+     
+     let remaining = quantityToDeduct;
+     
+     // Pass 1: Deduct from items with positive quantity
+     for (const item of items) {
+         if (remaining <= 0) break;
+         
+         const available = item.quantity;
+         
+         // If this item has stock, take from it
+         if (available > 0) {
+             const take = Math.min(available, remaining);
+             await updateInventory(item.id, -take);
+             remaining -= take;
+         }
+     }
+     
+     // Pass 2: If still remaining (deficit), force deduct from the first item found (or warn if none)
+     if (remaining > 0 && items.length > 0) {
+         await updateInventory(items[0].id, -remaining);
+     } else if (remaining > 0 && items.length === 0) {
+         console.warn(`No inventory item found for ${subtype} to deduct ${remaining}`);
+     }
+  };
+
+  // Deduct Containers (Pouch/Tin)
+  await deductStock(packagingType, packCount);
+  
+  // Deduct Labels (Stickers)
+  await deductStock('STICKER', packCount);
+
+  // AUTO LOG: PACKAGING USAGE COST (COGS)
+  // Calculate avg cost based on what we have (simplified: use first item cost found loosely)
+  const containerItem = mockInventory.find(i => 
+    i.subtype === packagingType || i.name.toUpperCase().includes(packagingType)
+  );
+  const labelItem = mockInventory.find(i => 
+    i.subtype === 'STICKER' || i.type === 'LABEL' || i.name.toUpperCase().includes('LABEL')
+  );
+
+  let containerUnitCost = 0;
+  if (containerItem) {
+      containerUnitCost = containerItem.unitCost / (containerItem.packSize || 1);
+  }
+  
+  let labelUnitCost = 0;
+  if (labelItem) {
+      labelUnitCost = labelItem.unitCost / (labelItem.packSize || 1);
+  }
+
+  const totalPkgCost = (packCount * containerUnitCost) + (packCount * labelUnitCost);
+  
+  // NOTE: This records USAGE cost for COGS. 
+  // Procurement cost is separate and handled by Purchase Orders.
+  await recordCostTransaction(
+      batch.id, 
+      0, 
+      0, 
+      totalPkgCost, 
+      0, 
+      0, 
+      0
+  );
+
+  return { success: true, data: newFinishedGood };
+};
+
+export const packRecipeFIFO = async (
+  recipeName: string,
+  totalWeightToPack: number,
+  totalPackCount: number,
+  packagingType: 'TIN' | 'POUCH'
+): Promise<ApiResponse<boolean>> => {
+  const availableBatches = mockBatches
+    .filter(b => 
+      b.selectedRecipeName === recipeName && 
+      (b.status === BatchStatus.DRYING_COMPLETE || (b.status === BatchStatus.PACKED && (b.remainingWeightKg || 0) > 0.1))
+    )
+    .sort((a, b) => new Date(a.dateReceived).getTime() - new Date(b.dateReceived).getTime());
+  
+  const totalAvailable = availableBatches.reduce((sum, b) => sum + (b.remainingWeightKg ?? b.netWeightKg), 0);
+  
+  if (totalWeightToPack > totalAvailable + 0.1) {
+      return { success: false, message: `Insufficient weight. Available: ${totalAvailable.toFixed(2)}kg` };
+  }
+
+  let weightNeeded = totalWeightToPack;
+  let packsRemaining = totalPackCount;
+  const yieldPerKg = totalPackCount / totalWeightToPack;
+
+  for (const batch of availableBatches) {
+      if (weightNeeded <= 0.01) break;
+      
+      const batchAvailable = batch.remainingWeightKg ?? batch.netWeightKg;
+      const takeWeight = Math.min(batchAvailable, weightNeeded);
+      let takePacks = Math.round(takeWeight * yieldPerKg);
+      if (takeWeight >= weightNeeded - 0.01) {
+          takePacks = packsRemaining;
+      }
+      
+      if (takePacks > 0) {
+          await packBatchPartial(batch.id, takeWeight, takePacks, packagingType, recipeName);
+          packsRemaining -= takePacks;
+      }
+      weightNeeded -= takeWeight;
+  }
+  
+  return { success: true, message: "Packed successfully." };
+};
+
+export const getFinishedGoods = async (forceRemote = false): Promise<ApiResponse<FinishedGood[]>> => {
+  const colRef = getUserCollection('finished_goods');
+  
+  // OPTIMIZATION: If we just wrote to cache, return cache to prevent flicker
+  if (!forceRemote && (Date.now() - lastWriteTime < WRITE_BUFFER_MS)) {
+      return { success: true, data: [...mockFinishedGoods] };
+  }
+
+  if (colRef) {
+      const snap = await colRef.get();
+      const data = snap.docs.map(d => d.data() as FinishedGood);
+      data.sort((a,b) => new Date(b.datePacked).getTime() - new Date(a.datePacked).getTime());
+      mockFinishedGoods = data;
+      return { success: true, data };
+  }
+  if (forceRemote) await pullFullDatabase();
+  return { success: true, data: [...mockFinishedGoods] };
+};
+
+export const getPackingHistory = async (): Promise<ApiResponse<FinishedGood[]>> => {
+  // Use cached data which is populated by getFinishedGoods
+  if (mockFinishedGoods.length === 0) await getFinishedGoods();
+  return { success: true, data: mockFinishedGoods.slice(0, 10) };
+};
+
+export const updateFinishedGoodImage = async (recipeName: string, packagingType: string, image: string | File): Promise<ApiResponse<boolean>> => {
+  let imageUrl = typeof image === 'string' ? image : '';
+  
+  if (typeof image !== 'string') {
+      try {
+          imageUrl = await uploadImage(image, 'product_images');
+      } catch (e: any) {
+          console.error("Upload failed", e);
+          return { success: false, message: e.message || "Upload failed" };
+      }
+  }
+
+  // 1. Update Local Cache Immediately
+  mockFinishedGoods.forEach(fg => {
+    if (fg.recipeName === recipeName && fg.packagingType === packagingType) fg.imageUrl = imageUrl;
+  });
+  lastWriteTime = Date.now();
+
+  // 2. Sync to Firestore
+  const user = auth.currentUser;
+  if (user) {
+    const q = db.collection('finished_goods')
+        .where("recipeName", "==", recipeName)
+        .where("packagingType", "==", packagingType);
+    
+    const snap = await q.get();
+    const updatePromises = snap.docs.map(d => d.ref.update({ imageUrl }));
+    await Promise.all(updatePromises);
+  }
+
+  return { success: true, message: "Image updated" };
+};
+
+export const updateFinishedGoodPrice = async (recipeName: string, packagingType: string, price: number): Promise<ApiResponse<boolean>> => {
+  // 1. Update Local Cache Immediately (FIX FOR UI LAG)
+  let updatedCount = 0;
+  mockFinishedGoods.forEach(fg => {
+    if (fg.recipeName === recipeName && fg.packagingType === packagingType) {
+        fg.sellingPrice = price;
+        updatedCount++;
+    }
+  });
+  
+  // Set buffer so the next read prefers this local data
+  lastWriteTime = Date.now();
+
+  // 2. Sync to Firestore
+  try {
+      const q = db.collection('finished_goods')
+        .where("recipeName", "==", recipeName)
+        .where("packagingType", "==", packagingType);
+
+      const snap = await q.get();
+      const updatePromises = snap.docs.map(d => d.ref.update({ sellingPrice: price }));
+      await Promise.all(updatePromises);
+      return { success: true, message: `Price updated for ${updatedCount} items` };
+  } catch (e: any) {
+      console.error("Price update failed:", e);
+      return { success: false, message: e.message };
+  }
+};
+
+// ============================================================================
+// INVENTORY & PROCUREMENT
+// ============================================================================
+export const getInventory = async (forceRemote = false): Promise<ApiResponse<InventoryItem[]>> => {
+  // READ-YOUR-WRITES BUFFER:
+  // If we recently wrote to the local cache, trust it over the server for a short time
+  // to prevent UI "flicker" where old server data overwrites new local data.
+  if (!forceRemote && (Date.now() - lastWriteTime < WRITE_BUFFER_MS)) {
+      return { success: true, data: [...mockInventory] };
+  }
+
+  const colRef = getUserCollection('inventory');
+  if (colRef) {
+      const snap = await colRef.get();
+      const data = snap.docs.map(d => d.data() as InventoryItem);
+      mockInventory = data;
+      return { success: true, data };
+  }
+  if (forceRemote) await pullFullDatabase();
+  return { success: true, data: [...mockInventory] };
+};
+
+export const updateInventory = async (id: string, change: number, newCost?: number): Promise<ApiResponse<InventoryItem>> => {
+  const index = mockInventory.findIndex(i => i.id === id);
+  if (index !== -1) {
+    mockInventory[index].quantity += change;
+    if (newCost !== undefined) mockInventory[index].unitCost = newCost;
+    
+    // UPDATE TIMESTAMP
+    lastWriteTime = Date.now();
+    
+    // Firestore Sync
+    const docRef = getUserDoc('inventory', id);
+    if (docRef) {
+        // Sanitize first
+        await docRef.set(cleanFirestoreData(mockInventory[index])); 
+    }
+    
+    return { success: true, data: mockInventory[index] };
+  }
+  return { success: false, message: "Item not found" };
+};
+
+export const addInventoryItem = async (item: InventoryItem): Promise<ApiResponse<InventoryItem>> => {
+  const exists = mockInventory.find(i => i.name === item.name);
+  if (exists) {
+      exists.supplier = item.supplier;
+      // Sync update
+      const docRef = getUserDoc('inventory', exists.id);
+      if (docRef) await docRef.set(cleanFirestoreData(exists));
+      
+      lastWriteTime = Date.now();
+      return { success: true, data: exists };
+  }
+  mockInventory.push(item);
+  
+  // Sync new
+  const docRef = getUserDoc('inventory', item.id);
+  if (docRef) await docRef.set(cleanFirestoreData(item));
+  
+  lastWriteTime = Date.now();
+  return { success: true, data: item };
+};
+
+export const deleteInventoryItem = async (id: string): Promise<ApiResponse<boolean>> => {
+  mockInventory = mockInventory.filter(i => i.id !== id);
+  
+  const docRef = getUserDoc('inventory', id);
+  if (docRef) await docRef.delete();
+  
+  lastWriteTime = Date.now();
+  return { success: true, message: "Item deleted" };
+};
+
+export const getSuppliers = async (): Promise<ApiResponse<Supplier[]>> => {
+  const colRef = getUserCollection('suppliers');
+  if (colRef) {
+      const snap = await colRef.get();
+      mockSuppliers = snap.docs.map(d => d.data() as Supplier);
+      return { success: true, data: mockSuppliers };
+  }
+  return { success: true, data: [...mockSuppliers] };
+};
+
+export const addSupplier = async (supplier: Supplier): Promise<ApiResponse<Supplier>> => {
+  mockSuppliers.push(supplier);
+  const docRef = getUserDoc('suppliers', supplier.id);
+  if (docRef) await docRef.set(cleanFirestoreData(supplier));
+  return { success: true, data: supplier };
+};
+
+export const deleteSupplier = async (id: string): Promise<ApiResponse<boolean>> => {
+  const initLen = mockSuppliers.length;
+  mockSuppliers = mockSuppliers.filter(s => s.id !== id);
+  const docRef = getUserDoc('suppliers', id);
+  if (docRef) await docRef.delete();
+  return { success: mockSuppliers.length < initLen, message: "Supplier removed" };
+};
+
+export const getPurchaseOrders = async (): Promise<ApiResponse<PurchaseOrder[]>> => {
+  const colRef = getUserCollection('purchase_orders');
+  if (colRef) {
+      const snap = await colRef.get();
+      const data = snap.docs.map(d => d.data() as PurchaseOrder);
+      data.sort((a,b) => new Date(b.dateOrdered).getTime() - new Date(a.dateOrdered).getTime());
+      mockPurchaseOrders = data;
+      return { success: true, data };
+  }
+  return { success: true, data: [...mockPurchaseOrders] };
+};
+
+export const createPurchaseOrder = async (itemId: string, qtyPackages: number, supplier: string): Promise<ApiResponse<PurchaseOrder>> => {
+  const item = mockInventory.find(i => i.id === itemId);
+  if (!item) return { success: false, message: "Item not found" };
+
+  const totalUnits = qtyPackages * (item.packSize || 1);
+  const totalCost = qtyPackages * item.unitCost;
+
+  const newPO: PurchaseOrder = {
+    id: `PO-${Date.now()}`,
+    itemId,
+    itemName: item.name,
+    quantity: qtyPackages,
+    packSize: item.packSize || 1,
+    totalUnits: totalUnits,
+    unitCost: item.unitCost,
+    totalCost: totalCost,
+    status: 'ORDERED',
+    dateOrdered: new Date().toISOString(),
+    supplier
+  };
+  mockPurchaseOrders.unshift(newPO);
+  
+  const docRef = getUserDoc('purchase_orders', newPO.id);
+  if (docRef) await docRef.set(cleanFirestoreData(newPO));
+
+  return { success: true, data: newPO };
+};
+
+export const receivePurchaseOrder = async (poId: string, qcPassed: boolean, notes?: string): Promise<ApiResponse<PurchaseOrder>> => {
+  const index = mockPurchaseOrders.findIndex(p => p.id === poId);
+  if (index === -1) return { success: false, message: "PO not found" };
+  const po = mockPurchaseOrders[index];
+  
+  if (!qcPassed) {
+    mockPurchaseOrders[index].status = 'COMPLAINT';
+    mockPurchaseOrders[index].qcPassed = false;
+    mockPurchaseOrders[index].complaintReason = notes || "QC Failed on Receipt";
+  } else {
+    mockPurchaseOrders[index].status = 'RECEIVED';
+    mockPurchaseOrders[index].dateReceived = new Date().toISOString();
+    mockPurchaseOrders[index].qcPassed = true;
+    await updateInventory(po.itemId, po.totalUnits);
+  }
+  
+  const docRef = getUserDoc('purchase_orders', poId);
+  if (docRef) await docRef.set(cleanFirestoreData(mockPurchaseOrders[index]));
+
+  return { success: true, data: mockPurchaseOrders[index] };
+};
+
+export const complaintPurchaseOrder = async (poId: string, reason: string): Promise<ApiResponse<PurchaseOrder>> => {
+  const index = mockPurchaseOrders.findIndex(p => p.id === poId);
+  mockPurchaseOrders[index].status = 'COMPLAINT';
+  mockPurchaseOrders[index].complaintReason = reason;
+
+  const docRef = getUserDoc('purchase_orders', poId);
+  if (docRef) await docRef.set(cleanFirestoreData(mockPurchaseOrders[index]));
+
+  return { success: true, data: mockPurchaseOrders[index] };
+};
+
+export const resolveComplaint = async (poId: string, resolution: string): Promise<ApiResponse<PurchaseOrder>> => {
+  const index = mockPurchaseOrders.findIndex(p => p.id === poId);
+  if (index === -1) return { success: false, message: "PO not found" };
+  
+  mockPurchaseOrders[index].status = 'RESOLVED';
+  mockPurchaseOrders[index].complaintResolution = resolution;
+  
+  const po = mockPurchaseOrders[index];
+  if (resolution.toLowerCase().includes('replacement') || resolution.toLowerCase().includes('received')) {
+      await updateInventory(po.itemId, po.totalUnits);
+  }
+
+  const docRef = getUserDoc('purchase_orders', poId);
+  if (docRef) await docRef.set(cleanFirestoreData(po));
+
+  return { success: true, data: mockPurchaseOrders[index] };
+};
+
+// ============================================================================
+// SALES & CUSTOMERS
+// ============================================================================
+export const getCustomers = async (): Promise<ApiResponse<Customer[]>> => {
+  const colRef = getUserCollection('customers');
+  if (colRef) {
+      const snap = await colRef.get();
+      mockCustomers = snap.docs.map(d => d.data() as Customer);
+      return { success: true, data: mockCustomers };
+  }
+  return { success: true, data: [...mockCustomers] };
+};
+
+export const addCustomer = async (customer: Customer): Promise<ApiResponse<Customer>> => {
+  mockCustomers.push(customer);
+  const docRef = getUserDoc('customers', customer.id);
+  if (docRef) await docRef.set(cleanFirestoreData(customer));
+  return { success: true, data: customer };
+};
+
+// ============================================================================
+// CRM ANALYTICS
+// ============================================================================
+
+export const updateCustomer = async (id: string, updates: Partial<Customer>): Promise<boolean> => {
+    // Update Local Cache
+    const index = mockCustomers.findIndex(c => c.id === id);
+    if (index !== -1) {
+        mockCustomers[index] = { ...mockCustomers[index], ...updates };
+        
+        // Firestore Sync
+        const docRef = getUserDoc('customers', id);
+        if (docRef) await docRef.set(cleanFirestoreData(mockCustomers[index]), { merge: true });
+        
+        return true;
+    }
+    return false;
+};
+
+export const getCustomerStats = async (customerId: string) => {
+    // Ensure sales are loaded
+    if (mockSales.length === 0) await getSales();
+    
+    const customerSales = mockSales.filter(s => s.customerId === customerId);
+
+    // Calculate Metrics
+    const totalSpent = customerSales.reduce((sum, s) => sum + s.totalAmount, 0);
+    const orderCount = customerSales.length;
+    
+    // Find Last Order Date
+    const lastOrder = customerSales.length > 0 
+        ? customerSales.sort((a,b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime())[0]
+        : null;
+
+    // Determine Favorite Product
+    const productCount: Record<string, number> = {};
+    customerSales.flatMap(s => s.items).forEach(i => {
+        const name = i.recipeName || 'Unknown';
+        productCount[name] = (productCount[name] || 0) + i.quantity;
+    });
+    
+    // Sort products by qty
+    const topProduct = Object.keys(productCount).sort((a,b) => productCount[b] - productCount[a])[0] || 'None';
+
+    const salesHistory = [...customerSales].sort((a,b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime());
+
+    return {
+        totalSpent,
+        orderCount,
+        lastOrderDate: lastOrder ? lastOrder.dateCreated : 'Never',
+        favoriteProduct: topProduct,
+        averageOrderValue: orderCount > 0 ? totalSpent / orderCount : 0,
+        salesHistory
+    };
+};
+
+export const getSales = async (forceRemote = false): Promise<ApiResponse<SalesRecord[]>> => {
+  // READ-YOUR-WRITES BUFFER:
+  // If recently written locally, return local data to prevent race condition flicker
+  if (!forceRemote && (Date.now() - lastWriteTime < WRITE_BUFFER_MS)) {
+      // Sort local data
+      const sorted = [...mockSales].sort((a,b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime());
+      return { success: true, data: sorted };
+  }
+
+  const colRef = getUserCollection('sales');
+  if (colRef) {
+      const snap = await colRef.get();
+      const data = snap.docs.map(d => d.data() as SalesRecord);
+      data.sort((a,b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime());
+      mockSales = data;
+      return { success: true, data };
+  }
+  return { success: true, data: [...mockSales] };
+};
+
+export const createSale = async (
+  customerId: string, 
+  items: { finishedGoodId: string, quantity: number, unitPrice: number }[], 
+  paymentMethod: PaymentMethod
+): Promise<ApiResponse<SalesRecord>> => {
+  
+  const finalItems = [];
+  let calculatedTotal = 0;
+
+  // 1. Validate & Deduct Stock for ALL items
+  for (const lineItem of items) {
+      const sampleGood = mockFinishedGoods.find(f => f.id === lineItem.finishedGoodId);
+      if (!sampleGood) return { success: false, message: `Product ID ${lineItem.finishedGoodId} not found` };
+
+      const matchingGoods = mockFinishedGoods
+          .filter(f => f.recipeName === sampleGood.recipeName && f.packagingType === sampleGood.packagingType && f.quantity > 0)
+          .sort((a,b) => new Date(a.datePacked).getTime() - new Date(b.datePacked).getTime());
+
+      let toDeduct = lineItem.quantity;
+      
+      // Check total availability first
+      const totalAvailable = matchingGoods.reduce((sum, item) => sum + item.quantity, 0);
+      if (totalAvailable < toDeduct) {
+          return { success: false, message: `Insufficient stock for ${sampleGood.recipeName}. Requested: ${toDeduct}, Available: ${totalAvailable}` };
+      }
+
+      // Perform Deduction
+      for (const stockBatch of matchingGoods) {
+          if (toDeduct <= 0) break;
+          const take = Math.min(stockBatch.quantity, toDeduct);
+          stockBatch.quantity -= take;
+          toDeduct -= take;
+          
+          const fgDoc = getUserDoc('finished_goods', stockBatch.id);
+          if (fgDoc) await fgDoc.update({ quantity: stockBatch.quantity });
+      }
+
+      // Add to final record
+      finalItems.push({
+          finishedGoodId: lineItem.finishedGoodId,
+          recipeName: sampleGood.recipeName,
+          packagingType: sampleGood.packagingType,
+          quantity: lineItem.quantity,
+          unitPrice: lineItem.unitPrice
+      });
+      
+      calculatedTotal += (lineItem.quantity * lineItem.unitPrice);
+  }
+
+  const customer = mockCustomers.find(c => c.id === customerId);
+  const newSale: SalesRecord = {
+    id: `SALE-${Date.now()}`,
+    invoiceId: `INV-${Math.floor(Math.random() * 100000)}`,
+    customerId,
+    customerName: customer ? customer.name : 'Unknown',
+    customerEmail: customer?.email,
+    customerPhone: customer?.contact,
+    items: finalItems,
+    totalAmount: calculatedTotal,
+    paymentMethod,
+    status: 'INVOICED',
+    dateCreated: new Date().toISOString()
+  };
+
+  mockSales.unshift(newSale);
+  lastWriteTime = Date.now();
+
+  const saleDoc = getUserDoc('sales', newSale.id);
+  if (saleDoc) await saleDoc.set(cleanFirestoreData(newSale));
+
+  return { success: true, data: newSale };
+};
+
+// ============================================================================
+// E-COMMERCE SERVICES
+// ============================================================================
+
+export const submitOnlineOrder = async (
+  customerName: string,
+  customerPhone: string,
+  customerEmail: string, // New Param
+  customerAddress: string, // New Param
+  cartItems: { item: FinishedGood, qty: number }[]
+): Promise<ApiResponse<string>> => {
+    
+    const newSaleId = `ORDER-${Date.now()}`;
+    const dateStr = new Date().toISOString();
+
+    // 1. Prepare Sales Record
+    // Note: We use 'GUEST' as customerId since they aren't registered yet
+    const saleRecord: SalesRecord = {
+        id: newSaleId,
+        invoiceId: `WEB-${Math.floor(Math.random() * 10000)}`,
+        customerId: 'GUEST',
+        customerName: customerName,
+        customerPhone: customerPhone,
+        customerEmail: customerEmail,
+        // @ts-ignore - Assuming shippingAddress isn't in main type yet, but we'll save it
+        shippingAddress: customerAddress, 
+        items: cartItems.map(c => ({
+            finishedGoodId: c.item.id,
+            recipeName: c.item.recipeName,
+            packagingType: c.item.packagingType,
+            quantity: c.qty,
+            unitPrice: c.item.sellingPrice
+        })),
+        totalAmount: cartItems.reduce((sum, c) => sum + (c.item.sellingPrice * c.qty), 0),
+        paymentMethod: 'COD', // Default for online orders
+        status: 'QUOTATION', // It starts as a Quote/Pending Order
+        dateCreated: dateStr
+    };
+
+    try {
+        // Save to Shared Sales Collection
+        // Because of our new Rules, this is allowed even without login!
+        const salesRef = db.collection('sales').doc(newSaleId);
+        await salesRef.set(cleanFirestoreData(saleRecord));
+        
+        return { success: true, message: "Order placed successfully!", data: saleRecord.invoiceId };
+    } catch (e: any) {
+        console.error("Order failed:", e);
+        return { success: false, message: "Could not place order. " + e.message };
+    }
+};
+
+export const updateSaleStatus = async (saleId: string, status: SalesStatus): Promise<ApiResponse<SalesRecord>> => {
+  let index = mockSales.findIndex(s => s.id === saleId);
+  let saleData = index !== -1 ? mockSales[index] : null;
+
+  // Fallback: Fetch from Firestore if not in local cache
+  if (!saleData) {
+      try {
+          const docRef = getUserDoc('sales', saleId);
+          const snap = await docRef.get();
+          if (snap.exists) {
+              saleData = snap.data() as SalesRecord;
+              mockSales.unshift(saleData);
+              index = 0;
+          }
+      } catch (e) {
+          console.error("Error fetching sale:", e);
+      }
+  }
+
+  if (!saleData || index === -1) return { success: false, message: "Sale not found in local cache" };
+
+  // --- AUTOMATIC CRM REGISTRATION (UPDATED) ---
+  if (saleData.customerId === 'GUEST' && status === 'INVOICED' && saleData.customerPhone) {
+      if (mockCustomers.length === 0) await getCustomers();
+      
+      // Check duplicate by phone
+      let existingCustomer = mockCustomers.find(c => c.contact === saleData!.customerPhone);
+      
+      if (!existingCustomer) {
+          console.log("🆕 Registering new B2C Customer from Shop Order...");
+          const newCustomer: Customer = {
+              id: `cust-${Date.now()}`,
+              name: saleData.customerName,
+              contact: saleData.customerPhone || '',
+              email: saleData.customerEmail || '', // Now capturing email
+              address: (saleData as any).shippingAddress || 'Online Order', // Now capturing address
+              type: 'B2C', 
+              status: 'ACTIVE',
+              joinDate: new Date().toISOString()
+          };
+          await addCustomer(newCustomer);
+          existingCustomer = newCustomer;
+      }
+      
+      // Link the Sale to the new Customer ID
+      saleData.customerId = existingCustomer.id;
+  }
+
+  // STOCK DEDUCTION LOGIC: Only deduct when moving from QUOTATION to INVOICED
+  if (saleData.status === 'QUOTATION' && status === 'INVOICED') {
+      const itemsToDeduct = saleData.items;
+      
+      for (const lineItem of itemsToDeduct) {
+          // Find matching goods in stock (FIFO logic)
+          const matchingGoods = mockFinishedGoods
+              .filter(f => f.recipeName === lineItem.recipeName && f.packagingType === lineItem.packagingType && f.quantity > 0)
+              .sort((a,b) => new Date(a.datePacked).getTime() - new Date(b.datePacked).getTime());
+
+          let toDeduct = lineItem.quantity;
+          
+          // Check total availability first
+          const totalAvailable = matchingGoods.reduce((sum, item) => sum + item.quantity, 0);
+          if (totalAvailable < toDeduct) {
+              return { success: false, message: `Insufficient stock for ${lineItem.recipeName}. Available: ${totalAvailable}` };
+          }
+
+          // Perform Deduction
+          for (const stockBatch of matchingGoods) {
+              if (toDeduct <= 0) break;
+              const take = Math.min(stockBatch.quantity, toDeduct);
+              stockBatch.quantity -= take;
+              toDeduct -= take;
+              
+              const fgDoc = getUserDoc('finished_goods', stockBatch.id);
+              if (fgDoc) await fgDoc.update({ quantity: stockBatch.quantity });
+          }
+      }
+  }
+
+  // UPDATE STATUS
+  mockSales[index].status = status;
+  // Include customerId update in case we registered them
+  const updates: any = { status, customerId: saleData.customerId }; 
+  
+  if ((status === 'DELIVERED' || status === 'SHIPPED') && !mockSales[index].dateDelivered) {
+      const dateStr = new Date().toISOString();
+      mockSales[index].dateDelivered = dateStr;
+      updates.dateDelivered = dateStr;
+  }
+  
+  lastWriteTime = Date.now();
+
+  try {
+      const saleDoc = getUserDoc('sales', saleId);
+      // Try direct update first
+      try {
+          await saleDoc.update(cleanFirestoreData(updates));
+      } catch (e: any) {
+          // If fail (e.g. document not found by ID because it was created via Shop with random ID)
+          // Search for it
+          const q = db.collection('sales').where('id', '==', saleId);
+          const snap = await q.get();
+          if (!snap.empty) {
+              await snap.docs[0].ref.update(cleanFirestoreData(updates));
+          } else {
+              throw e;
+          }
+      }
+      return { success: true, data: mockSales[index] };
+  } catch (error: any) {
+      console.error("Firestore Update Failed:", error);
+      return { success: false, message: error.message };
+  }
+};
+
+// ============================================================================
+// ANALYSIS & COSTS
+// ============================================================================
+export const getDailyProductionCosts = async (forceRemote = false): Promise<ApiResponse<DailyCostMetrics[]>> => {
+  const colRef = getUserCollection('daily_costs');
+  if (colRef) {
+      const snap = await colRef.get();
+      const data = snap.docs.map(d => d.data() as DailyCostMetrics);
+      data.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      mockDailyCosts = data;
+      return { success: true, data };
+  }
+
+  if (forceRemote) await pullFullDatabase();
+
+  const laborRate = getLaborRate();
+  const rawRate = getRawMaterialRate();
+  
+  // Initialize mock data if empty (First Load Simulation - Transactional)
+  if (mockDailyCosts.length === 0 && !colRef) { // Only generate mock if no firestore connection
+    const today = new Date();
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(today);
+        d.setDate(today.getDate() - i);
+        const dateStr = d.toISOString().split('T')[0];
+        
+        const batchId = `BATCH-SIM-${i}`;
+        const weight = 100 + (i * 10);
+        
+        // 1. Raw Material Transaction
+        mockDailyCosts.push({
+            id: `COST-RAW-${i}`,
+            referenceId: batchId,
+            date: dateStr,
+            weightProcessed: weight,
+            processingHours: 0,
+            rawMaterialCost: parseFloat((weight * rawRate).toFixed(2)),
+            packagingCost: 0,
+            wastageCost: 0,
+            laborCost: 0,
+            totalCost: parseFloat((weight * rawRate).toFixed(2))
+        });
+        // ... (rest of mock generation) ...
+    }
+  }
+
+  return { success: true, data: mockDailyCosts };
+};
+
+export const updateDailyCost = async (id: string, updates: Partial<DailyCostMetrics>): Promise<ApiResponse<boolean>> => {
+    const index = mockDailyCosts.findIndex(c => c.id === id); // Use ID now
+    if (index !== -1) {
+        // Update values
+        mockDailyCosts[index] = { ...mockDailyCosts[index], ...updates };
+        // Recalculate Total
+        const c = mockDailyCosts[index];
+        c.totalCost = c.rawMaterialCost + c.packagingCost + c.wastageCost + c.laborCost;
+
+        const docRef = getUserDoc('daily_costs', id);
+        if (docRef) await docRef.update(cleanFirestoreData({ ...updates, totalCost: c.totalCost }));
+
+        return { success: true, message: "Cost updated successfully" };
+    }
+    return { success: false, message: "Transaction record not found" };
+};
+
+export const getWeeklyRevenue = async (): Promise<{date: string, amount: number}[]> => {
+    // Requires Sales to be loaded
+    if (mockSales.length === 0) await getSales();
+
+    const revenueMap: Record<string, number> = {};
+    const today = new Date();
+    for(let i=6; i>=0; i--) {
+        const d = new Date(today);
+        d.setDate(today.getDate() - i);
+        revenueMap[d.toISOString().split('T')[0]] = 0;
+    }
+    mockSales.forEach(s => {
+        const date = s.dateCreated.split('T')[0];
+        // Updated logic to include new revenue recognizing statuses
+        if (revenueMap[date] !== undefined && s.status !== 'QUOTATION') {
+            revenueMap[date] += s.totalAmount;
+        }
+    });
+    return Object.keys(revenueMap).map(date => ({ date, amount: revenueMap[date] }));
+};
+
+// ============================================================================
+// BUDGETING
+// ============================================================================
+export const getMonthlyBudget = async (month: string): Promise<ApiResponse<Budget>> => {
+  const docId = `BUDGET-${month}`;
+  // Try Firestore
+  const docRef = getUserDoc('budgets', docId);
+  if (docRef) {
+      try {
+          const snap = await docRef.get();
+          if (snap.exists) {
+              return { success: true, data: snap.data() as Budget };
+          }
+      } catch (e) {
+          console.error("Error fetching budget:", e);
+      }
+  }
+  return { success: false, message: "No budget set" };
+};
+
+export const setMonthlyBudget = async (budget: Budget): Promise<ApiResponse<Budget>> => {
+  const docId = `BUDGET-${budget.month}`;
+  const docRef = getUserDoc('budgets', docId);
+  if (docRef) {
+      await docRef.set(cleanFirestoreData(budget));
+      return { success: true, data: budget };
+  }
+  return { success: false, message: "Database connection failed" };
+};
