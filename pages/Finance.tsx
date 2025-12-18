@@ -52,6 +52,7 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showEditCostModal, setShowEditCostModal] = useState(false);
   const [showRateModal, setShowRateModal] = useState(false);
+  const [viewOrderModal, setViewOrderModal] = useState<PurchaseOrder | null>(null);
   
   // Forms
   const [poItem, setPoItem] = useState('');
@@ -380,7 +381,7 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                      </div>
                  )}
 
-                 {/* --- NEW SECTION: PAST ORDERS HISTORY --- */}
+                 {/* --- NEW SECTION: PAST ORDERS HISTORY (UPDATED) --- */}
                  <div className="mt-8 pt-6 border-t border-slate-200">
                     <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
                         <FileClock className="text-slate-500" size={20} /> Order History
@@ -394,45 +395,43 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                             purchaseOrders
                                 .filter(p => p.status === 'RECEIVED' || p.status === 'RESOLVED')
                                 .sort((a, b) => new Date(b.dateOrdered).getTime() - new Date(a.dateOrdered).getTime())
-                                .map(po => (
-                                    <div key={po.id} className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-between items-center group hover:bg-white hover:shadow-sm transition-all">
-                                        <div>
-                                            <div className="flex items-center space-x-2 mb-1">
-                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide ${
-                                                    po.status === 'RECEIVED' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
-                                                }`}>
-                                                    {po.status}
-                                                </span>
-                                                <span className="text-xs text-slate-400 font-mono">#{po.id}</span>
-                                                <span className="text-xs text-slate-400">• {new Date(po.dateOrdered).toLocaleDateString()}</span>
+                                .map(po => {
+                                    // --- LOGIC TO SHOW 'CANCELLED' IF REFUNDED ---
+                                    const isRefunded = po.status === 'RESOLVED' && po.complaintResolution === 'Refunded';
+                                    const displayStatus = isRefunded ? 'CANCELLED' : po.status;
+                                    const statusStyle = isRefunded 
+                                        ? 'bg-red-100 text-red-700' // Red for Cancelled
+                                        : po.status === 'RECEIVED' 
+                                            ? 'bg-green-100 text-green-700' 
+                                            : 'bg-blue-100 text-blue-700';
+
+                                    return (
+                                        <div key={po.id} className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-between items-center group hover:bg-white hover:shadow-sm transition-all">
+                                            <div>
+                                                <div className="flex items-center space-x-2 mb-1">
+                                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide ${statusStyle}`}>
+                                                        {displayStatus}
+                                                    </span>
+                                                    <span className="text-xs text-slate-400 font-mono">#{po.id}</span>
+                                                    <span className="text-xs text-slate-400">• {new Date(po.dateOrdered).toLocaleDateString()}</span>
+                                                </div>
+                                                <h4 className="font-bold text-slate-700">{po.itemName}</h4>
+                                                <p className="text-xs text-slate-500 font-medium">
+                                                    Supplier: <span className="text-slate-700">{po.supplier}</span> • {po.quantity} packs
+                                                </p>
                                             </div>
-                                            <h4 className="font-bold text-slate-700">{po.itemName}</h4>
-                                            <p className="text-xs text-slate-500 font-medium">
-                                                Supplier: <span className="text-slate-700">{po.supplier}</span> • {po.quantity} packs
-                                            </p>
+                                            <div className="text-right">
+                                                <div className="text-sm font-black text-slate-700">RM {po.totalCost.toFixed(2)}</div>
+                                                <button 
+                                                    onClick={() => setViewOrderModal(po)}
+                                                    className="text-xs text-blue-600 font-bold opacity-0 group-hover:opacity-100 transition-opacity mt-1 hover:underline"
+                                                >
+                                                    View Record
+                                                </button>
+                                            </div>
                                         </div>
-                                        <div className="text-right">
-                                            <div className="text-sm font-black text-slate-700">RM {po.totalCost.toFixed(2)}</div>
-                                            <button 
-                                                onClick={() => {
-                                                    alert(
-                                                        `📜 ORDER RECORD #${po.id}\n` +
-                                                        `--------------------------------\n` +
-                                                        `Item: ${po.itemName}\n` +
-                                                        `Supplier: ${po.supplier}\n` +
-                                                        `Quantity: ${po.quantity} packs\n` +
-                                                        `Total Cost: RM ${po.totalCost.toFixed(2)}\n` +
-                                                        `Date Ordered: ${new Date(po.dateOrdered).toLocaleDateString()}\n` +
-                                                        `Status: ${po.status}`
-                                                    );
-                                                }}
-                                                className="text-xs text-blue-600 font-bold opacity-0 group-hover:opacity-100 transition-opacity mt-1 hover:underline"
-                                            >
-                                                View Record
-                                            </button>
-                                        </div>
-                                    </div>
-                            ))
+                                    );
+                                })
                         )}
                     </div>
                  </div>
@@ -823,6 +822,78 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                   ></textarea>
                   <button onClick={handleSubmitComplaint} className="w-full py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700">Submit Complaint</button>
                   <button onClick={() => setShowComplaintModal(null)} className="mt-3 w-full text-sm text-slate-500">Cancel</button>
+              </div>
+          </div>
+      )}
+
+      {/* --- VIEW PAST ORDER MODAL (UPDATED) --- */}
+      {viewOrderModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+              <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
+                  {/* Header */}
+                  <div className={`p-4 flex justify-between items-center ${viewOrderModal.status === 'RECEIVED' ? 'bg-green-600' : 'bg-slate-700'}`}>
+                      <h3 className="font-bold text-white flex items-center gap-2">
+                          <Receipt size={18} /> Order Record
+                      </h3>
+                      <button onClick={() => setViewOrderModal(null)} className="text-white/80 hover:text-white">
+                          <X size={20} />
+                      </button>
+                  </div>
+                  
+                  {/* Receipt Content */}
+                  <div className="p-6 space-y-4">
+                      <div className="text-center border-b border-slate-100 pb-4">
+                          <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Total Value</div>
+                          <div className="text-3xl font-black text-slate-800">RM {viewOrderModal.totalCost.toFixed(2)}</div>
+                          <div className="text-xs text-slate-500 mt-1">{new Date(viewOrderModal.dateOrdered).toLocaleDateString()}</div>
+                      </div>
+
+                      <div className="space-y-3 text-sm">
+                          <div className="flex justify-between">
+                              <span className="text-slate-500">Order ID</span>
+                              <span className="font-mono font-bold text-slate-700">#{viewOrderModal.id}</span>
+                          </div>
+                          <div className="flex justify-between">
+                              <span className="text-slate-500">Item</span>
+                              <span className="font-bold text-slate-700">{viewOrderModal.itemName}</span>
+                          </div>
+                          <div className="flex justify-between">
+                              <span className="text-slate-500">Supplier</span>
+                              <span className="font-bold text-slate-700">{viewOrderModal.supplier}</span>
+                          </div>
+                          
+                          {/* --- NEW SECTION: ISSUE & RESOLUTION DETAILS --- */}
+                          {(viewOrderModal.status === 'RESOLVED' || viewOrderModal.complaintResolution) && (
+                              <div className="mt-4 bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
+                                  <div className="flex items-center gap-1 text-slate-800 font-bold mb-2 border-b border-slate-200 pb-1">
+                                      <AlertTriangle size={12} className="text-orange-500"/> Incident Report
+                                  </div>
+                                  
+                                  <div className="mb-2">
+                                      <span className="text-slate-400 uppercase font-bold text-[10px]">Issue Reported:</span>
+                                      <p className="text-red-600 font-medium">{viewOrderModal.complaintReason || 'Unspecified Issue'}</p>
+                                  </div>
+                                  
+                                  <div>
+                                      <span className="text-slate-400 uppercase font-bold text-[10px]">Resolution:</span>
+                                      <p className="text-green-700 font-black text-sm uppercase">
+                                          {viewOrderModal.complaintResolution || 'Resolved'}
+                                      </p>
+                                  </div>
+                              </div>
+                          )}
+                      </div>
+                  </div>
+
+                  {/* Footer */}
+                  <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-center">
+                      <button 
+                          onClick={() => setViewOrderModal(null)}
+                          className="w-full py-2 bg-white border border-slate-300 text-slate-600 font-bold rounded-lg hover:bg-slate-100"
+                      >
+                          Close Record
+                      </button>
+                  </div>
               </div>
           </div>
       )}
