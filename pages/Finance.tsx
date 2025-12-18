@@ -1,5 +1,3 @@
-
-
 import React, { useEffect, useState, useMemo } from 'react';
 import { 
     getFinishedGoods, getInventory, getPurchaseOrders, createPurchaseOrder, 
@@ -62,7 +60,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
   const [editingCost, setEditingCost] = useState<DailyCostMetrics | null>(null);
   const [newSupplier, setNewSupplier] = useState({ name: '', address: '', contact: '', itemName: '', itemType: 'PACKAGING', itemSubtype: 'POUCH', packSize: 100, unitCost: 45 });
   
-  // UPDATED CUSTOMER FORM
   const [newCustomer, setNewCustomer] = useState<Partial<Customer>>({ name: '', email: '', contact: '', address: '', type: 'B2C', status: 'ACTIVE' });
   
   // SALES FORM
@@ -82,7 +79,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
     setLaborRateState(getLaborRate());
     setRawRateState(getRawMaterialRate());
     
-    // Explicitly fetching fresh sales to ensure sync
     const s = await getSales(true); 
     if (s.success) setSales(s.data || []);
 
@@ -96,7 +92,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
     if (sup.success) setSuppliers(sup.data || []);
     if (cust.success) setCustomers(cust.data || []);
     if (goods.success) setFinishedGoods(goods.data || []);
-    // Sales already set above
     if (costs.success) setDailyCosts(costs.data || []);
     setWeeklyRevenue(rev);
 
@@ -125,7 +120,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
      }
   }, [salesGood, finishedGoods]);
 
-  // --- AGGREGATION FOR DAILY LOG ---
   const aggregatedCosts = useMemo(() => {
       const map = new Map<string, DailyCostMetrics>();
       
@@ -148,8 +142,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
       return Array.from(map.values()).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [dailyCosts]);
 
-  // --- ACTIONS ---
-  
   const handleAddToCart = () => {
       if (!salesGood) return;
       const product = availableGoods[salesGood];
@@ -211,13 +203,11 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
       refreshData(); 
   };
 
-  // RESTORED: Add Supplier Logic
   const handleAddSupplier = async (e: React.FormEvent) => {
       e.preventDefault();
       const supRes = await addSupplier({ id: `sup-${Date.now()}`, name: newSupplier.name, address: newSupplier.address, contact: newSupplier.contact });
       
       if (supRes.success) {
-          // Auto-add the primary item they supply
           await addInventoryItem({
               id: `inv-${Date.now()}`,
               name: newSupplier.itemName,
@@ -246,38 +236,20 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
 
   const handleUpdateStatus = async (sale: SalesRecord, newStatus: string) => {
       if (newStatus === 'INVOICED' && !window.confirm("Confirm order? Stock will be deducted.")) return;
-      
       setUpdatingId(sale.id);
-      
       try {
           const res = await updateSaleStatus(sale.id, newStatus as SalesStatus);
-          
           if (res.success && res.data) {
-              // 1. Locally update the sales list immediately to prevent UI lag/duplication
-              setSales(prevSales => 
-                  prevSales.map(s => s.id === sale.id ? { ...s, status: newStatus as SalesStatus } : s)
-              );
-              
-              // 2. Set selected sale for view if needed
+              setSales(prevSales => prevSales.map(s => s.id === sale.id ? { ...s, status: newStatus as SalesStatus } : s));
               if (selectedSale && selectedSale.id === sale.id) {
                   setSelectedSale({ ...selectedSale, status: newStatus as SalesStatus });
               }
-
-              // 3. Update Document View Type
               if (newStatus === 'INVOICED') setViewDocType('INVOICE');
               if (newStatus === 'SHIPPED') setViewDocType('DO');
               if (newStatus === 'PAID') setViewDocType('RECEIPT');
-              
-              // 4. Background Refresh (Optional, but good for consistency)
               refreshData();
-          } else {
-              alert("Update failed: " + res.message);
-          }
-      } catch (e: any) {
-          alert("Error: " + e.message);
-      } finally { 
-          setUpdatingId(null); 
-      }
+          } else { alert("Update failed: " + res.message); }
+      } catch (e: any) { alert("Error: " + e.message); } finally { setUpdatingId(null); }
   };
 
   const handleSaveCostEdit = async (e: React.FormEvent) => { e.preventDefault(); if (editingCost && editingCost.id) { await updateDailyCost(editingCost.id, editingCost); setShowEditCostModal(false); setEditingCost(null); refreshData(); } };
@@ -286,7 +258,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
   const handleQC = async (passed: boolean) => { if (showQCModal) { if (passed) { await receivePurchaseOrder(showQCModal, true); setShowQCModal(null); } else { setShowComplaintModal(showQCModal); setShowQCModal(null); } refreshData(); } };
   const handleSubmitComplaint = async () => { if (showComplaintModal && complaintReason) { await complaintPurchaseOrder(showComplaintModal, complaintReason); setShowComplaintModal(null); setComplaintReason(''); refreshData(); } };
   
-  // Updated: Direct call to resolve without using modal state
   const handleResolveComplaint = async (poId: string, resolution: string) => {
       await resolveComplaint(poId, resolution);
       refreshData();
@@ -298,7 +269,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
   const handleUpdateRate = () => { setLaborRate(laborRate); setRawMaterialRate(rawRate); setShowRateModal(false); refreshData(); };
   const handleEditCostClick = (cost: DailyCostMetrics) => { setEditingCost({ ...cost }); setShowEditCostModal(true); };
 
-  // Calculations
   const totalPackagingProcurement = purchaseOrders.filter(p => p.status === 'RECEIVED' || p.status === 'ORDERED').reduce((acc, p) => acc + p.totalCost, 0);
   const totalRawMaterialCost = dailyCosts.reduce((acc, d) => acc + d.rawMaterialCost, 0);
   const totalLaborCost = dailyCosts.reduce((acc, d) => acc + d.laborCost, 0);
@@ -358,7 +328,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
               <div className="lg:col-span-2 space-y-4">
                  <div className="flex justify-between items-center"><h3 className="font-bold text-slate-700">Active Orders</h3><div className="flex space-x-2"><button onClick={() => setShowSupplierModal(true)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg font-bold flex items-center hover:bg-slate-200"><Building2 size={18} className="mr-2"/> Manage Suppliers</button><button onClick={() => setShowOrderModal(true)} className="px-4 py-2 bg-earth-800 text-white rounded-lg font-bold flex items-center shadow-lg hover:bg-earth-900"><ShoppingCart size={18} className="mr-2"/> New Order</button></div></div>
                  
-                 {/* Active Order List */}
                  {purchaseOrders.filter(p => p.status === 'ORDERED').map(po => (
                      <div key={po.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex justify-between items-center">
                         <div><div className="flex items-center space-x-2"><span className="text-xs font-bold bg-blue-50 text-blue-600 px-2 py-0.5 rounded uppercase">{po.supplier}</span><span className="text-xs text-slate-400">{new Date(po.dateOrdered).toLocaleDateString()}</span></div><h4 className="font-bold text-slate-800">{po.itemName}</h4><p className="text-sm text-slate-600">{po.quantity} packs ({po.totalUnits} units) • RM {po.totalCost.toFixed(2)}</p></div>
@@ -366,14 +335,12 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                      </div>
                  ))}
                  
-                 {/* No active orders placeholder */}
                  {purchaseOrders.filter(p => p.status === 'ORDERED').length === 0 && (
                      <div className="text-center py-6 border-2 border-dashed border-slate-100 rounded-xl">
                         <p className="text-slate-400 text-sm">No pending orders.</p>
                      </div>
                  )}
 
-                 {/* PENDING COMPLAINTS SECTION */}
                  {purchaseOrders.some(p => p.status === 'COMPLAINT') && (
                      <div className="mt-8 animate-in slide-in-from-bottom duration-500">
                         <div className="flex items-center space-x-2 mb-3">
@@ -413,6 +380,63 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                      </div>
                  )}
 
+                 {/* --- NEW SECTION: PAST ORDERS HISTORY --- */}
+                 <div className="mt-8 pt-6 border-t border-slate-200">
+                    <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
+                        <FileClock className="text-slate-500" size={20} /> Order History
+                    </h3>
+                    <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                        {purchaseOrders.filter(p => p.status === 'RECEIVED' || p.status === 'RESOLVED').length === 0 ? (
+                            <div className="text-center py-8 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                <p className="text-sm italic">No past orders found.</p>
+                            </div>
+                        ) : (
+                            purchaseOrders
+                                .filter(p => p.status === 'RECEIVED' || p.status === 'RESOLVED')
+                                .sort((a, b) => new Date(b.dateOrdered).getTime() - new Date(a.dateOrdered).getTime())
+                                .map(po => (
+                                    <div key={po.id} className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-between items-center group hover:bg-white hover:shadow-sm transition-all">
+                                        <div>
+                                            <div className="flex items-center space-x-2 mb-1">
+                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide ${
+                                                    po.status === 'RECEIVED' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                                                }`}>
+                                                    {po.status}
+                                                </span>
+                                                <span className="text-xs text-slate-400 font-mono">#{po.id}</span>
+                                                <span className="text-xs text-slate-400">• {new Date(po.dateOrdered).toLocaleDateString()}</span>
+                                            </div>
+                                            <h4 className="font-bold text-slate-700">{po.itemName}</h4>
+                                            <p className="text-xs text-slate-500 font-medium">
+                                                Supplier: <span className="text-slate-700">{po.supplier}</span> • {po.quantity} packs
+                                            </p>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="text-sm font-black text-slate-700">RM {po.totalCost.toFixed(2)}</div>
+                                            <button 
+                                                onClick={() => {
+                                                    alert(
+                                                        `📜 ORDER RECORD #${po.id}\n` +
+                                                        `--------------------------------\n` +
+                                                        `Item: ${po.itemName}\n` +
+                                                        `Supplier: ${po.supplier}\n` +
+                                                        `Quantity: ${po.quantity} packs\n` +
+                                                        `Total Cost: RM ${po.totalCost.toFixed(2)}\n` +
+                                                        `Date Ordered: ${new Date(po.dateOrdered).toLocaleDateString()}\n` +
+                                                        `Status: ${po.status}`
+                                                    );
+                                                }}
+                                                className="text-xs text-blue-600 font-bold opacity-0 group-hover:opacity-100 transition-opacity mt-1 hover:underline"
+                                            >
+                                                View Record
+                                            </button>
+                                        </div>
+                                    </div>
+                            ))
+                        )}
+                    </div>
+                 </div>
+
               </div>
               <div className="space-y-6">
                   <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
@@ -426,7 +450,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
 
       {activeTab === 'sales' && allowedTabs.includes('sales') && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in">
-           {/* UPDATED: SALES POS UI */}
            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-fit">
               <h3 className="font-bold text-slate-800 mb-4 flex items-center"><Store className="mr-2"/> Point of Sale</h3>
               <div className="space-y-4">
@@ -462,7 +485,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                                     placeholder="1" 
                                 />
                             </div>
-
                             <div className="flex-1 relative">
                                 <label className="sr-only">Price</label>
                                 <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold">RM</div>
@@ -475,7 +497,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                                     placeholder="0.00" 
                                 />
                             </div>
-
                             <button 
                                 onClick={handleAddToCart} 
                                 className="shrink-0 h-[42px] px-4 bg-earth-800 text-white rounded-lg font-bold hover:bg-earth-900 shadow-sm flex items-center justify-center transition-colors"
@@ -486,7 +507,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                      </div>
                  </div>
 
-                 {/* CART DISPLAY */}
                  <div className="border-t border-b border-slate-100 py-2 max-h-40 overflow-y-auto">
                      {salesCart.length === 0 ? (
                          <p className="text-center text-slate-400 text-sm py-4">Cart is empty</p>
@@ -703,8 +723,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                         {inventory.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
                     </select>
                     <input type="number" className="w-full p-2 border rounded" value={poQtyPackages} onChange={e => setPoQtyPackages(e.target.value)} required placeholder="Quantity" />
-                    
-                    {/* DYNAMIC PACK SIZE DISPLAY */}
                     {poItem && (() => {
                         const selected = inventory.find(i => i.id === poItem);
                         const packSize = selected?.packSize || 100;
@@ -715,7 +733,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                             </div>
                         );
                     })()}
-
                     <div className="flex gap-2">
                         <button type="button" onClick={() => setShowOrderModal(false)} className="flex-1 py-2 text-slate-500 bg-slate-100 rounded">Cancel</button>
                         <button type="submit" className="flex-1 py-2 bg-earth-800 text-white rounded">Place Order</button>
@@ -734,12 +751,10 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                       <input placeholder="Email" className="w-full p-2 border rounded" required value={newCustomer.email} onChange={e => setNewCustomer({...newCustomer, email: e.target.value})} />
                       <input placeholder="Phone" className="w-full p-2 border rounded" value={newCustomer.contact} onChange={e => setNewCustomer({...newCustomer, contact: e.target.value})} />
                       <input placeholder="Address" className="w-full p-2 border rounded" value={newCustomer.address} onChange={e => setNewCustomer({...newCustomer, address: e.target.value})} />
-                      
                       <div className="flex gap-2 mt-2">
                           <button type="button" onClick={() => setNewCustomer({...newCustomer, type: 'B2C'})} className={`flex-1 p-2 rounded border text-sm font-bold ${newCustomer.type === 'B2C' ? 'bg-green-100 border-green-300 text-green-700' : 'border-slate-200 text-slate-500'}`}>Individual (B2C)</button>
                           <button type="button" onClick={() => setNewCustomer({...newCustomer, type: 'B2B'})} className={`flex-1 p-2 rounded border text-sm font-bold ${newCustomer.type === 'B2B' ? 'bg-blue-100 border-blue-300 text-blue-700' : 'border-slate-200 text-slate-500'}`}>Business (B2B)</button>
                       </div>
-
                       <button type="submit" className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg mt-2">Save Customer</button>
                   </form>
                   <button onClick={() => setShowCustomerModal(false)} className="mt-3 w-full text-sm text-slate-500">Cancel</button>
@@ -747,7 +762,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
           </div>
       )}
 
-      {/* SUPPLIER MODAL */}
       {showSupplierModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
               <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full">
@@ -757,7 +771,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                       <input placeholder="Supplier Name" className="w-full p-2 border rounded" required value={newSupplier.name} onChange={e => setNewSupplier({...newSupplier, name: e.target.value})} />
                       <input placeholder="Contact (Email/Phone)" className="w-full p-2 border rounded" value={newSupplier.contact} onChange={e => setNewSupplier({...newSupplier, contact: e.target.value})} />
                       <input placeholder="Address" className="w-full p-2 border rounded" value={newSupplier.address} onChange={e => setNewSupplier({...newSupplier, address: e.target.value})} />
-                      
                       <div className="pt-2 border-t border-slate-100">
                           <label className="block text-xs font-bold text-slate-500 mb-1">Primary Item Supplied</label>
                           <input placeholder="Item Name (e.g. Red Pouch)" className="w-full p-2 border rounded mb-2" required value={newSupplier.itemName} onChange={e => setNewSupplier({...newSupplier, itemName: e.target.value})} />
@@ -778,7 +791,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                               <input type="number" placeholder="Cost (RM)" className="w-full p-2 border rounded" value={newSupplier.unitCost} onChange={e => setNewSupplier({...newSupplier, unitCost: parseFloat(e.target.value)})} />
                           </div>
                       </div>
-
                       <button type="submit" className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg mt-2">Register Supplier & Item</button>
                   </form>
                   <button onClick={() => setShowSupplierModal(false)} className="mt-3 w-full text-sm text-slate-500">Close</button>
@@ -786,7 +798,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
           </div>
       )}
 
-      {/* QC MODAL */}
       {showQCModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
               <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full text-center">
@@ -800,7 +811,6 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
           </div>
       )}
 
-      {/* COMPLAINT MODAL */}
       {showComplaintModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
               <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full">
