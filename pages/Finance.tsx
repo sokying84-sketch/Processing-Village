@@ -40,7 +40,11 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
   const [targetProfit, setTargetProfit] = useState('');
   
   const [laborRate, setLaborRateState] = useState<number>(12.50);
-  const [rawRate, setRawRateState] = useState<number>(8.00);
+  const [rawRate, setRawMaterialRateState] = useState<number>(8.00);
+  
+  // REPORT STATES
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportPeriod, setReportPeriod] = useState<'WEEK' | 'MONTH'>('MONTH');
   
   // Modals & UI
   const [showOrderModal, setShowOrderModal] = useState(false);
@@ -53,6 +57,7 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
   const [showEditCostModal, setShowEditCostModal] = useState(false);
   const [showRateModal, setShowRateModal] = useState(false);
   const [viewOrderModal, setViewOrderModal] = useState<PurchaseOrder | null>(null);
+  const [overviewView, setOverviewView] = useState<'COST' | 'REVENUE'>('COST');
   
   // Forms
   const [poItem, setPoItem] = useState('');
@@ -78,7 +83,7 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
 
   const refreshData = async () => {
     setLaborRateState(getLaborRate());
-    setRawRateState(getRawMaterialRate());
+    setRawMaterialRateState(getRawMaterialRate());
     
     const s = await getSales(true); 
     if (s.success) setSales(s.data || []);
@@ -275,7 +280,10 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
   const totalLaborCost = dailyCosts.reduce((acc, d) => acc + d.laborCost, 0);
   const totalWastageCost = dailyCosts.reduce((acc, d) => acc + d.wastageCost, 0);
   const totalOverallCost = totalPackagingProcurement + totalRawMaterialCost + totalLaborCost;
-  const totalSalesRevenue = sales.filter(s => s.status === 'PAID' || s.status === 'DELIVERED').reduce((acc, s) => acc + s.totalAmount, 0);
+  
+  // UPDATED: Only count sales that are strictly 'PAID'
+  const totalSalesRevenue = sales.filter(s => s.status === 'PAID').reduce((acc, s) => acc + s.totalAmount, 0);
+  
   const netProfit = totalSalesRevenue - totalOverallCost;
   const avgCostPerUnit = finishedGoods.reduce((acc, i) => acc + i.quantity, 0) > 0 ? totalOverallCost / finishedGoods.reduce((acc, i) => acc + i.quantity, 0) : 0;
   const revenueProgress = currentBudget && currentBudget.targetRevenue > 0 ? (totalSalesRevenue / currentBudget.targetRevenue) * 100 : 0;
@@ -573,6 +581,21 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
 
       {activeTab === 'overview' && allowedTabs.includes('overview') && (
          <div className="space-y-6">
+            
+            {/* --- NEW HEADER WITH REPORT BUTTON --- */}
+            <div className="flex justify-between items-center mb-4">
+                <div>
+                    <h2 className="text-2xl font-bold text-slate-800">Financial Overview</h2>
+                    <p className="text-slate-500 text-sm">Real-time performance metrics</p>
+                </div>
+                <button 
+                    onClick={() => setShowReportModal(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg font-bold shadow-md hover:bg-slate-700 transition-all"
+                >
+                    <Printer size={18} /> Generate Report
+                </button>
+            </div>
+
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="p-4 bg-slate-800 text-white flex justify-between items-center cursor-pointer" onClick={() => setShowBudgetForm(!showBudgetForm)}>
                     <div className="flex items-center"><Target className="mr-2 text-green-400" /><div><h3 className="font-bold text-lg">Financial Planning</h3><p className="text-xs text-slate-400">Monthly Targets & Performance</p></div></div>
@@ -602,7 +625,7 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200"><p className="text-xs font-bold text-slate-400 uppercase">Total Revenue</p><p className="text-2xl font-black text-green-700">RM {totalSalesRevenue.toFixed(2)}</p></div>
                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200"><p className="text-xs font-bold text-slate-400 uppercase">Total Expenses</p><p className="text-2xl font-black text-red-700">RM {totalOverallCost.toFixed(2)}</p></div>
-               <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200"><p className="text-xs font-bold text-slate-400 uppercase">Net Profit</p><p className={`text-2xl font-black ${netProfit >= 0 ? 'text-blue-700' : 'text-red-700'}`}>RM {netProfit.toFixed(2)}</p></div>
+               <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200"><p className={`text-xs font-bold uppercase ${netProfit >= 0 ? 'text-slate-400' : 'text-red-400'}`}>Net Profit</p><p className={`text-2xl font-black ${netProfit >= 0 ? 'text-blue-700' : 'text-red-700'}`}>RM {netProfit.toFixed(2)}</p></div>
                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200"><p className="text-xs font-bold text-slate-400 uppercase">Avg Cost/Unit</p><p className="text-2xl font-black text-slate-700">RM {avgCostPerUnit.toFixed(2)}</p></div>
             </div>
 
@@ -627,34 +650,142 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                 </div>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center"><h3 className="font-bold text-slate-800 flex items-center"><FileText className="mr-2 text-earth-600" /> Daily Production Cost Log</h3><span className="text-xs text-slate-400">Combined view per batch</span></div>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left">
-                        <thead className="bg-slate-100 text-slate-500 font-bold border-b border-slate-200"><tr><th className="p-3">Date</th><th className="p-3">Ref ID</th><th className="p-3">Activity</th><th className="p-3 text-right">Raw Mat.</th><th className="p-3 text-right">Packing</th><th className="p-3 text-right">Labor</th><th className="p-3 text-right">Wastage</th><th className="p-3 text-right">Total</th></tr></thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {aggregatedCosts.map(cost => (
-                                <tr key={cost.id} className="hover:bg-blue-50 transition-colors">
-                                    <td className="p-3 font-medium text-slate-700">{new Date(cost.date).toLocaleDateString()}</td>
-                                    <td className="p-3 font-mono text-xs text-slate-500">{cost.referenceId || '-'}</td>
-                                    <td className="p-3 text-xs text-slate-600">
-                                        {cost.weightProcessed > 0 && <div>Proc: {cost.weightProcessed}kg</div>}
-                                        {cost.processingHours > 0 && <div>Labor: {cost.processingHours.toFixed(2)}h</div>}
-                                    </td>
-                                    <td className="p-3 text-right">RM {cost.rawMaterialCost.toFixed(2)}</td>
-                                    <td className="p-3 text-right">RM {cost.packagingCost.toFixed(2)}</td>
-                                    <td className="p-3 text-right">RM {cost.laborCost.toFixed(2)}</td>
-                                    <td className="p-3 text-right text-red-500">RM {cost.wastageCost.toFixed(2)}</td>
-                                    <td className="p-3 text-right font-black text-slate-800">RM {cost.totalCost.toFixed(2)}</td>
-                                </tr>
-                            ))}
-                            {dailyCosts.length === 0 && (
-                                <tr><td colSpan={8} className="p-8 text-center text-slate-400 italic">No production activity recorded yet.</td></tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
+            {/* --- TOGGLE BUTTONS --- */}
+            <div className="flex items-center gap-3 mb-6 mt-8 border-b border-slate-200 pb-4">
+                <button 
+                    onClick={() => setOverviewView('COST')}
+                    className={`px-5 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${
+                        overviewView === 'COST' 
+                        ? 'bg-slate-800 text-white shadow-md ring-2 ring-slate-200' 
+                        : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200'
+                    }`}
+                >
+                    <FileText size={18} /> Production Cost Log
+                </button>
+                <button 
+                    onClick={() => setOverviewView('REVENUE')}
+                    className={`px-5 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all ${
+                        overviewView === 'REVENUE' 
+                        ? 'bg-green-600 text-white shadow-md ring-2 ring-green-100' 
+                        : 'bg-white text-slate-500 hover:bg-green-50 border border-slate-200 hover:text-green-600'
+                    }`}
+                >
+                    <TrendingUp size={18} /> Revenue History
+                </button>
             </div>
+
+            {/* --- OPTION 1: COST LOG VIEW --- */}
+            {overviewView === 'COST' && (
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-left-4 duration-300">
+                    <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                        <h3 className="font-bold text-slate-800 flex items-center">
+                            <FileText className="mr-2 text-earth-600" /> Daily Production Cost Log
+                        </h3>
+                        <span className="text-xs text-slate-400">Combined view per batch</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-slate-100 text-slate-500 font-bold border-b border-slate-200">
+                                <tr>
+                                    <th className="p-3">Date</th>
+                                    <th className="p-3">Ref ID</th>
+                                    <th className="p-3">Activity</th>
+                                    <th className="p-3 text-right">Raw Mat.</th>
+                                    <th className="p-3 text-right">Packing</th>
+                                    <th className="p-3 text-right">Labor</th>
+                                    <th className="p-3 text-right">Wastage</th>
+                                    <th className="p-3 text-right">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {aggregatedCosts.map(cost => (
+                                    <tr key={cost.id} className="hover:bg-blue-50 transition-colors cursor-pointer" onClick={() => handleEditCostClick(cost)}>
+                                        <td className="p-3 font-medium text-slate-700">{new Date(cost.date).toLocaleDateString()}</td>
+                                        <td className="p-3 font-mono text-xs text-slate-500">{cost.referenceId || '-'}</td>
+                                        <td className="p-3 text-xs text-slate-600">
+                                            {cost.weightProcessed > 0 && <div>Proc: {cost.weightProcessed}kg</div>}
+                                            {cost.processingHours > 0 && <div>Labor: {cost.processingHours.toFixed(2)}h</div>}
+                                        </td>
+                                        <td className="p-3 text-right">RM {cost.rawMaterialCost.toFixed(2)}</td>
+                                        <td className="p-3 text-right">RM {cost.packagingCost.toFixed(2)}</td>
+                                        <td className="p-3 text-right">RM {cost.laborCost.toFixed(2)}</td>
+                                        <td className="p-3 text-right text-red-500">RM {cost.wastageCost.toFixed(2)}</td>
+                                        <td className="p-3 text-right font-black text-slate-800">RM {cost.totalCost.toFixed(2)}</td>
+                                    </tr>
+                                ))}
+                                {dailyCosts.length === 0 && (
+                                    <tr><td colSpan={8} className="p-8 text-center text-slate-400 italic">No production activity recorded yet.</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {/* --- OPTION 2: REVENUE HISTORY VIEW (STRICTLY PAID ONLY) --- */}
+            {overviewView === 'REVENUE' && (
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-right-4 duration-300">
+                    <div className="p-4 border-b border-slate-100 bg-green-50 flex justify-between items-center">
+                        <h3 className="font-bold text-green-900 flex items-center">
+                            <TrendingUp className="mr-2 text-green-600" /> Revenue History
+                        </h3>
+                        <span className="text-xs text-green-700 font-bold bg-green-100 px-2 py-1 rounded">
+                            Verified Income (Paid Only)
+                        </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
+                                <tr>
+                                    <th className="p-3">Date</th>
+                                    <th className="p-3">Invoice ID</th>
+                                    <th className="p-3">Customer</th>
+                                    <th className="p-3">Items Sold</th>
+                                    <th className="p-3 text-center">Status</th>
+                                    <th className="p-3 text-right">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {/* UPDATED FILTER: STRICTLY 'PAID' ONLY */}
+                                {sales.filter(s => s.status === 'PAID').length === 0 ? (
+                                    <tr><td colSpan={6} className="p-8 text-center text-slate-400 italic">No paid transactions recorded yet.</td></tr>
+                                ) : (
+                                    sales
+                                    .filter(s => s.status === 'PAID') 
+                                    .sort((a, b) => new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime())
+                                    .map(sale => (
+                                        <tr key={sale.id} className="hover:bg-green-50/50 transition-colors">
+                                            <td className="p-3 font-medium text-slate-700">{new Date(sale.dateCreated).toLocaleDateString()}</td>
+                                            <td className="p-3 font-mono text-xs text-slate-500">{sale.invoiceId || sale.id}</td>
+                                            <td className="p-3 text-slate-700 font-bold">{sale.customerName}</td>
+                                            <td className="p-3 text-xs text-slate-600 max-w-xs truncate">
+                                                {sale.items.map(i => `${i.quantity}x ${i.recipeName}`).join(', ')}
+                                            </td>
+                                            <td className="p-3 text-center">
+                                                <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase bg-green-100 text-green-700">
+                                                    {sale.status}
+                                                </span>
+                                            </td>
+                                            <td className="p-3 text-right font-black text-green-700">
+                                                RM {sale.totalAmount.toFixed(2)}
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                            <tfoot className="bg-slate-50 border-t border-slate-200">
+                                <tr>
+                                    <td colSpan={5} className="p-3 text-right font-bold text-slate-500 uppercase text-xs">Total Paid Revenue</td>
+                                    <td className="p-3 text-right font-black text-slate-800 text-lg">
+                                        {/* Matches the top variable logic exactly */}
+                                        RM {sales.filter(s => s.status === 'PAID').reduce((acc, s) => acc + s.totalAmount, 0).toFixed(2)}
+                                    </td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            )}
          </div>
       )}
 
@@ -704,7 +835,7 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                   <h3 className="text-lg font-bold mb-4">Production Rates</h3>
                   <div className="space-y-4">
                       <div><label className="block text-xs font-bold text-slate-500 mb-1">Labor Rate (RM/Hour)</label><input type="number" step="0.50" className="w-full p-2 border rounded" value={laborRate} onChange={e => setLaborRateState(parseFloat(e.target.value))} /></div>
-                      <div><label className="block text-xs font-bold text-slate-500 mb-1">Raw Material (RM/Kg)</label><input type="number" step="0.50" className="w-full p-2 border rounded" value={rawRate} onChange={e => setRawRateState(parseFloat(e.target.value))} /></div>
+                      <div><label className="block text-xs font-bold text-slate-500 mb-1">Raw Material (RM/Kg)</label><input type="number" step="0.50" className="w-full p-2 border rounded" value={rawRate} onChange={e => setRawMaterialRateState(parseFloat(e.target.value))} /></div>
                       <button onClick={handleUpdateRate} className="w-full py-3 bg-earth-800 text-white font-bold rounded">Update Rates</button>
                   </div>
                   <button onClick={() => setShowRateModal(false)} className="w-full mt-3 text-sm text-slate-500">Cancel</button>
@@ -896,6 +1027,138 @@ const FinancePage: React.FC<FinanceProps> = ({ allowedTabs = ['procurement', 'sa
                   </div>
               </div>
           </div>
+      )}
+
+      {/* --- FINANCIAL REPORT GENERATOR MODAL --- */}
+      {showReportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+                
+                {/* Modal Header (No Print) */}
+                <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 print:hidden">
+                    <h3 className="font-bold text-lg flex items-center gap-2">
+                        <FileText className="text-earth-600"/> Generate Financial Report
+                    </h3>
+                    <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-slate-200">
+                        <button 
+                            onClick={() => setReportPeriod('WEEK')} 
+                            className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${reportPeriod === 'WEEK' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                        >
+                            Weekly
+                        </button>
+                        <button 
+                            onClick={() => setReportPeriod('MONTH')} 
+                            className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${reportPeriod === 'MONTH' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                        >
+                            Monthly
+                        </button>
+                    </div>
+                    <button onClick={() => setShowReportModal(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
+                </div>
+
+                {/* PRINTABLE REPORT CONTENT */}
+                <div className="p-8 overflow-y-auto flex-1 bg-white" id="financial-report">
+                    {/* Dynamic Calculation Logic */}
+                    {(() => {
+                        const now = new Date();
+                        const startDate = new Date();
+                        if (reportPeriod === 'WEEK') startDate.setDate(now.getDate() - 7);
+                        else startDate.setMonth(now.getMonth() - 1);
+
+                        // 1. Calculate Revenue (Paid only)
+                        const periodSales = sales.filter(s => new Date(s.dateCreated) >= startDate && s.status === 'PAID');
+                        const periodRevenue = periodSales.reduce((sum, s) => sum + s.totalAmount, 0);
+
+                        // 2. Calculate Expenses
+                        const periodCosts = dailyCosts.filter(c => new Date(c.date) >= startDate);
+                        const labor = periodCosts.reduce((sum, c) => sum + c.laborCost, 0);
+                        const material = periodCosts.reduce((sum, c) => sum + c.rawMaterialCost, 0);
+                        const packaging = periodCosts.reduce((sum, c) => sum + c.packagingCost, 0);
+                        const wastage = periodCosts.reduce((sum, c) => sum + c.wastageCost, 0);
+                        const totalExpenses = labor + material + packaging + wastage;
+
+                        const netProfit = periodRevenue - totalExpenses;
+                        const profitMargin = periodRevenue > 0 ? (netProfit / periodRevenue) * 100 : 0;
+
+                        return (
+                            <div className="space-y-6">
+                                {/* Report Header */}
+                                <div className="text-center border-b-2 border-slate-800 pb-6 mb-6">
+                                    <h1 className="text-3xl font-black text-slate-900 uppercase tracking-widest">Financial Performance</h1>
+                                    <p className="text-slate-500 font-medium mt-2">
+                                        Period: {reportPeriod === 'WEEK' ? 'Last 7 Days' : 'Last 30 Days'} 
+                                        <span className="mx-2">•</span> 
+                                        {startDate.toLocaleDateString()} - {now.toLocaleDateString()}
+                                    </p>
+                                </div>
+
+                                {/* Executive Summary */}
+                                <div className="grid grid-cols-3 gap-4 mb-8">
+                                    <div className="p-4 bg-green-50 rounded-lg border border-green-100 text-center">
+                                        <div className="text-xs font-bold text-green-600 uppercase mb-1">Total Revenue</div>
+                                        <div className="text-2xl font-black text-green-800">RM {periodRevenue.toFixed(2)}</div>
+                                    </div>
+                                    <div className="p-4 bg-red-50 rounded-lg border border-red-100 text-center">
+                                        <div className="text-xs font-bold text-red-600 uppercase mb-1">Total Expenses</div>
+                                        <div className="text-2xl font-black text-red-800">RM {totalExpenses.toFixed(2)}</div>
+                                    </div>
+                                    <div className="p-4 bg-blue-50 rounded-lg border border-blue-100 text-center">
+                                        <div className="text-xs font-bold text-blue-600 uppercase mb-1">Net Profit</div>
+                                        <div className={`text-2xl font-black ${netProfit >= 0 ? 'text-blue-800' : 'text-red-600'}`}>
+                                            RM {netProfit.toFixed(2)}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Detailed Breakdown */}
+                                <div className="grid grid-cols-2 gap-8">
+                                    <div>
+                                        <h4 className="font-bold text-slate-800 border-b pb-2 mb-3">Expense Breakdown</h4>
+                                        <div className="space-y-2 text-sm">
+                                            <div className="flex justify-between"><span>Labor Costs</span><span className="font-mono">RM {labor.toFixed(2)}</span></div>
+                                            <div className="flex justify-between"><span>Raw Materials</span><span className="font-mono">RM {material.toFixed(2)}</span></div>
+                                            <div className="flex justify-between"><span>Packaging</span><span className="font-mono">RM {packaging.toFixed(2)}</span></div>
+                                            <div className="flex justify-between text-red-600 font-medium"><span>Wastage Loss</span><span className="font-mono">RM {wastage.toFixed(2)}</span></div>
+                                            <div className="flex justify-between font-bold border-t pt-2 mt-1"><span>Total</span><span>RM {totalExpenses.toFixed(2)}</span></div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-slate-800 border-b pb-2 mb-3">Key Metrics</h4>
+                                        <div className="space-y-2 text-sm">
+                                            <div className="flex justify-between"><span>Transactions</span><span className="font-mono">{periodSales.length} orders</span></div>
+                                            <div className="flex justify-between"><span>Avg Order Value</span><span className="font-mono">RM {periodSales.length > 0 ? (periodRevenue / periodSales.length).toFixed(2) : '0.00'}</span></div>
+                                            <div className="flex justify-between"><span>Profit Margin</span><span className={`font-mono font-bold ${profitMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>{profitMargin.toFixed(1)}%</span></div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Footer Signature Area */}
+                                <div className="mt-12 pt-12 border-t border-slate-200 flex justify-between text-xs text-slate-400">
+                                    <div>Generated on: {new Date().toLocaleString()}</div>
+                                    <div>Authorized Signature: __________________________</div>
+                                </div>
+                            </div>
+                        );
+                    })()}
+                </div>
+
+                {/* Modal Footer (No Print) */}
+                <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-3 print:hidden">
+                    <button 
+                        onClick={() => setShowReportModal(false)}
+                        className="px-4 py-2 text-slate-500 hover:bg-slate-200 rounded-lg font-bold"
+                    >
+                        Close
+                    </button>
+                    <button 
+                        onClick={() => window.print()} 
+                        className="px-6 py-2 bg-slate-800 text-white rounded-lg font-bold hover:bg-slate-900 flex items-center gap-2"
+                    >
+                        <Printer size={18}/> Print Report
+                    </button>
+                </div>
+            </div>
+        </div>
       )}
     </div>
   );
